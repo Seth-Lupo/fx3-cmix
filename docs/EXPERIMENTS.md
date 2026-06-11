@@ -94,3 +94,8 @@ Next: per-byte scalar dump (pos, word0, wp[word0], indirectWord0Pos, numberA, in
 | 037b full | 2026-06-11 | exp/037b-sta-all | T0 | text_1M | 70,310–70,313 | **all 8 mdc±1 points flat (±2B)** | ~6m each | 7.6 GB | ❌ null result | STA1/2/4/5 mdc is locally optimal (or T0 powerless here); queue2's STA6/7 mdc±4 grid is the wider test. Null chronicled per convention |
 
 **exp/038 launched (spot3 queue4):** APM-chain scalar export prune — the 7 update-level scalars (pr, pu, pv×2, pt, pz, pr_final) keep feeding fxcm's internal fp-mixers but export neutral 0.5 to cmix behind FXCM_EXPORT_PRUNE=1 (approximates removal without num_models plumbing). Tests kaitz's "one good predictor in fxcm can make compression worse in cmix" against our export-all port choice. Runs: sanity (must = 70,311) + prune at T0 + prune at T1.
+
+| 038sane | 2026-06-11 | exp/038-export-prune | T0 | text_1M | 70,311 | ±0 ✓ gate green | 5m53s | 7.6 GB | ✅ sanity | default build identical to tip |
+| 038prune | 2026-06-11 | exp/038-export-prune | T0/T1 | text_1M/10M | 70,359 / 1,052,697 | **+48 @T0, +1,199 @T1** | 6m / 54m | 7.9 GB | ❌ **reject — scalars are load-bearing** | neutralizing the 7 APM-chain scalar exports to cmix hurts decisively; our export-all port choice validated; kaitz's "fewer exports" caution does not apply to these slots |
+| 031-t1 | 2026-06-11 | exp/031-mxA2-3-half | T1 | text_10M | 1,051,499 | **+1 vs tip — FREE** | 1h01m | 7.86 GB | ✅ **adopt as RAM trim** | mxA2[3] 0x10000→0x8000 = −35 MiB at zero size cost through T1 |
+| 032-t0 | 2026-06-11 | exp/032-cmC2-4-rollback | T0 | text_1M | 70,311 | ±0 | 6m08s | 7.37 GB | ⏳ T1 running | cmC2[4] 16→8×4096×4096 (−256 MiB); RSS already −210 MB at T0 |
