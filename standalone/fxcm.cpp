@@ -84,6 +84,7 @@ short *model_predictions1,*model_predictions1_ptr;
 unsigned int prediction_index=0;
 
 int prediction_lines[600];  // debug: __LINE__ of each AddPrediction call this bit
+FILE* g_mixtrace = NULL;    // debug: per-call mix3 trace, window-gated from update()
 void AddPredictionL(int x, int line) {
     prediction_lines[prediction_index]=line;
     model_predictions1[prediction_index++]=x;
@@ -1317,6 +1318,8 @@ struct ContextMap4 {
     // Predict to mixer m from bit history state s, using sm to map s to
     // a probability.
     inline int mix3(const int s) {
+        extern FILE* g_mixtrace;
+        if (g_mixtrace) fprintf(g_mixtrace, "%p %d\n", (void*)this, s);
         if (s==0){
             if (skip2==1) x.mxInputs1.add(0);
             x.mxInputs1.add(0);
@@ -5647,6 +5650,17 @@ void update() {
             }
             U32 flags[4] = {(U32)isCategory, (U32)skipSeeExternal, lastCW, (U32)x.blpos};
             fwrite(flags, 4, 4, trf2);
+        }
+        {
+            static FILE* mtf = (FILE*)-1;
+            if (mtf == (FILE*)-1) {
+                const char* e = getenv("FXTRACE3");
+                mtf = e ? fopen(e, "w") : NULL;
+                if (mtf) fprintf(mtf, "BASES %p %p\n", (void*)cmC4, (void*)cmCR);
+            }
+            g_mixtrace = (mtf && bitn >= 8015 && bitn <= 8021) ? mtf : NULL;
+            if (mtf && bitn == 8015) fprintf(mtf, "BIT %ld\n", bitn);
+            if (g_mixtrace) fprintf(mtf, "ENDBIT %ld\n", bitn);
         }
         bitn++;
     }
