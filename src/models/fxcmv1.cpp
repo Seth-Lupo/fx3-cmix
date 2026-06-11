@@ -3844,7 +3844,7 @@ void PredictorInit() {
     cmC4[3].Init(     128*4096, 2, c_s[16],c_s3[16],&STA1[0][0],c_s4[16],0x00,0);
 
     cmC2[9].Init(  8*4096*4096, 4, c_s[17],c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
-    cmC2[10].Init( 8*4096*4096, 6, c_s[18],c_s3[18],&STA5[0][0],c_s4[18],0xf0,1,&st2_p1[0]);
+    cmC2[10].Init(16*4096*4096, 6, c_s[18],c_s3[18],&STA5[0][0],c_s4[18],0xf0,1,&st2_p1[0]); // exp039: memory-rebalance upside probe, 8->16 (+256MiB); predictor-gains doc says big CMs still memory-starved
     cmC2[11].Init( 8*4096*4096, 5, c_s[19],c_s3[19],&STA5[0][0],c_s4[19],0xf0,1,&st2_p1[0]);
     cmC2[12].Init( 8*4096*4096, 2, c_s[20],c_s3[20],&STA6[0][0],c_s4[20],0xf0,1,&st2_p1[0]);
     cmC2[13].Init(16*4096*4096, 2, c_s[21],c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
