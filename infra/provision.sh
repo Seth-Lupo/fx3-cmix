@@ -15,10 +15,11 @@ while [ $# -gt 0 ]; do
   shift
 done
 
-# centralus: only scanned region offering D4ds_v4 to this student subscription
-# with matching family quota (eastus/westus2/etc return NotAvailableForSubscription).
+# centralus + westcentralus: the two regions offering v3/v4 SKUs to this student
+# subscription (eastus/westus2/etc return NotAvailableForSubscription). Quotas are
+# PER-REGION (6 on-demand + 3 spot vCPUs each) — override LOC to tap the second pool.
 RG=hutter-lab
-LOC=centralus
+LOC="${LOC:-centralus}"
 
 az group create -n $RG -l $LOC -o none
 
