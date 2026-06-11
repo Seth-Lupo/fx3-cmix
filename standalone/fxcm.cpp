@@ -170,13 +170,14 @@ template <const int S=256>
 struct alignas(64) Inputs {
     short n[S];
     int ncount;     // mixer input count
-    void add(int p){ 
+    void addL(int p, int line){
         assert(p>-2048 && p<2048);// fixme, when enabled compression is different
         n[ncount++]=clp(p);
         assert(ncount>=0 && ncount<=S);
-        AddPrediction((clp(p)));
+        AddPredictionL(clp(p), line);
     }
 };
+#define add(p) addL((p), __LINE__)   // debug: route caller line into prediction trace
 
 template <const int S>
 struct BlockData {
