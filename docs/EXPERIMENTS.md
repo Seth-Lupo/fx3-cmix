@@ -51,7 +51,10 @@ Every experiment gets a row here — **including null and negative results**. De
 | 015 | 2026-06-11 | exp/015-skipm1 | T0 | text_1M | 71,338 | +6 (noise) | 5m21s | 5.74 GB | ✅ adopt+merged | skipM1 gates (step 9); value = speed at scale (+11K author) |
 | 016 | 2026-06-11 | exp/016-codeword | T0 | text_1M | 71,332 | ±0 | 5m24s | 5.74 GB | ✅ adopt+merged, **decode RT OK** | codeword machinery (step 10) — gate open for sentence contexts |
 
-**next-fx3 cumulative @T0: 71,332-71,338 (−7..−13 vs fx2). Steps merged: PPM-RAM, match×2, SSE blend, −SparseMatch, −4SSCM, st2/WUS/APM knobs, Pronoun, skipM1, codeword machinery.**
+| 017 | 2026-06-11 | exp/017-heading-skip | T0 | text_1M | 71,381 | +49 standalone | 8m40s | 5.73 GB | ✅ merged via stack | heading/category skip (step 11); costs info at 1MB, pays at full scale |
+| 019 | 2026-06-11 | exp/019-worcxt stack (11+12+13) | T0 | text_1M | **71,240** | **−92 vs parent** | 8m33s | 5.75 GB | ✅ adopt+merged, **decode RT OK** | PState contexts + worcxt rework; num_models 430 (fxcm) |
+
+**next-fx3 cumulative @T0: 71,240 (−105 vs fx2 71,345). Steps 1-13 of 25 merged. Next: steps 14-16, then 17 sentence contexts (largest author-measured win).**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
