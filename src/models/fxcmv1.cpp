@@ -90,7 +90,14 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15+30+154+20-144+14+1;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC4[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19) -144 step20 class swap (CM3 4/3 + CM4 3/2 per slot incl. run, markers gone; +cmC4[8] 2 slots, +cmCR 3 slots) +14 step23 mixer outputs 10->24 (mxA[10..16] +7, mxA[18] lstmex keeper +1, mxA[17]+mxA1[0..4] +6) +1 step24 post-chain final pr => 524
+// v26 step25: DirectStateMap bank compile-time flag. Default ON; build with -DFXCM_DCSM=0
+// to compile the component out entirely (this is the component fx2 deleted over the historic
+// compress/decompress divergence - keep the kill switch one build flag away).
+#ifndef FXCM_DCSM
+#define FXCM_DCSM 1
+#endif
+
+int num_models = 439+1-2-7-2-4+5+4+15+30+154+20-144+14+1+(FXCM_DCSM?5:0);  // v26 step25: +5 dcsm mix outputs (19 pre1 inputs excluded via prediction_index--) => 529 when on // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC4[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19) -144 step20 class swap (CM3 4/3 + CM4 3/2 per slot incl. run, markers gone; +cmC4[8] 2 slots, +cmCR 3 slots) +14 step23 mixer outputs 10->24 (mxA[10..16] +7, mxA[18] lstmex keeper +1, mxA[17]+mxA1[0..4] +6) +1 step24 post-chain final pr
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -713,11 +720,11 @@ struct StateMap {
         t[i]=(((n1<<20) / (n0+n1)) << 12);
     }
   }
-  inline void update() {    
+  inline void update() {
     assert(x.y==0 || x.y==1);
     U32 *p=&t[cxt], p0=p[0];
-    int pr1=p0>>13;
-    p0+=(x.y<<19)-pr1;
+    int pr1=p0>>14;  // v26 step25: fx2 used >>13/<<19; v26 truth is >>14/<<18 (only dcsm uses this struct)
+    p0+=(x.y<<18)-pr1;
     p[0]=p0;
   }
   // update bit y (0..1), predict next bit in context cx
@@ -1487,7 +1494,6 @@ struct  APM {
     }
 };
 
-short pre1[256];
 // v26 step15: dt-curve U32 counter map; 2 mixer inputs per instance, both exported
 struct StationaryMap {
     U32 *Data;
@@ -1532,48 +1538,86 @@ struct StationaryMap {
     }
 };
 
-struct DirectStateMap {
-  StateMap *sm;
-  int *cxt;
-  U32 mask;
-  U8 *CxtState;
-  int index;
-  int count;
-  const U8 *nn;
-    
-  void __attribute__ ((noinline)) Init(int m,int c,const U8 *nn1){
-    nn=nn1;
-    mask=(1<<m)-1,index=0,count=c;
-    alloc(cxt,c);
-    alloc(CxtState,(mask+1));
-    alloc(sm,c);
-    for (int i=0; i<count; i++) 
-      sm[i].Init(256,nn1);
-  }
-  U8 next(int state, int y){
-      return nn[state*4+y];
-  }
-  void set(U32 cx,int y) {
-    CxtState[cxt[index]]=next(CxtState[cxt[index]],y);       // update state
-    cxt[index]=(cx)&mask;                                     // get new context
-    sm[index].set(CxtState[cxt[index]]);    // predict from new context
-    x.mxInputs1.add(stretch(sm[index].pr)>>2);
-    prediction_index--;
-    x.mxInputs1.add(pre1[CxtState[cxt[index]]]);// sub
-    prediction_index--;
-    index++;
-  }
-  void mix() {
-    index=0;
-  }
+#if FXCM_DCSM
+// v26 step25: precalculated state -> prediction for STA7 (v26 const table; replaces fx2's
+// runtime pre2() fill)
+static const short pre1[256]={
+    0,  -89,   88, -125,    0,    0,  124, -148,  -36,  -36,   35,   35,  147, -165,  -59,  -59,
+    0,    0,   58,   58,  164, -178,  -76,  -76,  -23,  -23,   22,   22,   75,   75,  177, -189,
+  -89,  -40,    0,   39,   88,  188, -198, -100,  -53,  -17,   16,   53,   99,  197, -207, -109,
+  -64,  -30,    0,   30,   64,  109,  205, -214, -118,  -74,  -41,  -14,   13,   41,   73,  117,
+  213, -220, -125,  -82,  -51,  -25,   24,   50,   81,  124,  219, -226, -131,  -89,  -59,  -34,
+   33,   58,   88,  131,  225, -232, -137,  -96,  -66,  -42,   41,   66,   95,  136,  231, -237,
+ -143, -102,  -73,  -50,   49,   72,  101,  142,  236, -241, -148, -107,  -79,  -56,   55,   78,
+  106,  147,  240, -246, -152, -112,  -84,  -62,   61,   83,  111,  152,  244, -250, -157, -117,
+  -89,  -67,   67,   88,  116,  156,  249, -253, -161, -121,  -94,  -72,   72,   93,  120,  160,
+  252, -257, -165, -125,  -98,  -77,   76,   97,  124,  164,  255, -261, -168, -129, -102,  -81,
+   80,  101,  128,  167,  259, -264, -172, -132, -106,  -85,   85,  105,  131,  171,  262, -267,
+ -175, -136, -109,  -89,   88,  109,  135,  174,  265, -270, -178, -139, -113,  -93,   92,  112,
+  138,  177,  268, -273, -181, -142, -116,  -96,   95,  115,  141,  180,  271, -275, -184, -145,
+ -119,  -99,   99,  118,  144,  183,  273, -278, -186, -148, -122, -102,  102,  121,  147,  185,
+  276, -280, -189, -151, -105,  105,  150,  188,  278, -283, -191, -153,  152,  190,  281, -194,
+ -156,  155,  193, -196, -158,  157,  195, -160,  159, -163,  162, -165,  164, -167,  166, -169,
 };
-void pre2(U8 *nn) {
-    for (int i=0; i<256; i++){    
-        U32 n0=nn[i*4+2]*3+1;
-        U32 n1=nn[i*4+3]*3+1;
-        pre1[i]=clp(stretch(((n1<<12) / (n0+n1))))>>2;
+
+// v26 step25: InDirectStateMap - direct-indexed byte-state table (CxtState[cx&mask]), a
+// per-context StateMap over the state, and a chained 2-input Mix per context, so each
+// instance emits ONE combined order-w prediction (mix() adds pu>>2) plus per-set
+// non-exported pre1[state] inputs. This replaces the dormant fx2 version (the component
+// kaitz deleted from fx2 over the historic divergence).
+struct DirectStateMap {
+    StateMap *sm;
+    U32 *cxt;
+    U32 mask;
+    U8 *CxtState;
+    int index;
+    int count;
+    const U8 *nn;
+    Mix *mmm;
+    int pu;
+    void __attribute__ ((noinline)) Init(int m,int c,const U8 *nn1) {
+        nn=nn1;pu=0;
+        mask=(1<<m)-1,index=0,count=c;
+        assert(mask>=64 && ((mask+1)&mask)==0);
+        alloc(cxt,c);
+        alloc(CxtState,(mask+1));
+        alloc(sm,c);
+        alloc(mmm,c);
+        for (int i=0; i<count; i++) {
+            sm[i].Init(256,nn1);
+            mmm[i].Init(256);
+        }
     }
-}
+    U8 next(int state, int y) {
+        return nn[state*4+y];
+    }
+    void reset() {
+        // v26 step25 FIXED reset geometry: v26 does memset(CxtState,0,mask) which misses the
+        // last byte (the table is mask+1 bytes) - same raw-pointer/short-length bug class as
+        // the fx2 ContextMap resets. Clear the full used range from the allocated base.
+        // reset() is never called in v26 (only cmC/cmC4 reset per article), so this fix
+        // changes nothing vs v26 output today; it is armed for future per-article resets.
+        memset(CxtState, 0, mask+1);
+    }
+    void set(U32 cx,int y) {
+        assert(cxt[index]<=mask);
+        assert(index<count);
+        CxtState[cxt[index]]=next(CxtState[cxt[index]],y);       // update state
+        cxt[index]=(cx)&mask;                                     // get new context
+        const U8 state=CxtState[cxt[index]];
+        sm[index].set(state);    // predict from new context
+        if (index==0) pu=stretch(sm[index].pr);
+        else mmm[index-1].update(x.y),  pu=clp(mmm[index-1].pp(pu,stretch(sm[index].pr),state)); // comma-sequenced update-then-predict: load-bearing, keep as-is
+        x.mxInputs1.add(pre1[state]);
+        prediction_index--; // pre1 inputs are mixer-only, not exported (v26 excludes them too)
+        index++;
+    }
+    void mix() {
+        x.mxInputs1.add((pu)>>2);
+        index=pu=0;
+    }
+};
+#endif // FXCM_DCSM
   
 int buf(int i);
 int bufr(int i);
@@ -3543,6 +3587,7 @@ U32 t[14];
 int c1,c2,c3;
 U8 words,spaces,numbers;
 U32 word0,word00,wshift,x4,x5,isMatch,firstWord,linkword,senword; // v26 step13: word1..3 dropped (worcxt0 stream replaces them)
+U32 h=0; // v26 step25: promoted from modelPrediction local to global (global in v26; dcsm0/dcsmN read it every bit, it is written at bpos==0 only)
 U32 xword1=0,numberA=0; // v26 step14: numberA digit-run hash; step17: xword1 similar-sentence word
 bool skipM1=false; // v26 step9: long-match context skipping flag
 bool skipSeeExternal=false; // v26 step11: inside See also/References/Bibliography/External links section
@@ -3665,8 +3710,13 @@ WordsContext *simiwor;    // v26 step17: best similar sentence (or empty)
 BracketContext<U16> htcxt;
 XMLModel1 xml; // v26 step19
 
-//DirectStateMap dcsm;  //1x5 inputs to fp
-//DirectStateMap dcsm1; //1x2 inputs to fp
+#if FXCM_DCSM
+DirectStateMap dcsm;  // v26 step25: word0 x worcxt.Word(1..4) + c0 (5 ctx, 27-bit)
+DirectStateMap dcsm0; // v26 step25: h + worcxt1.Word(1..6) (6 ctx, 27-bit)
+DirectStateMap dcsm1; // v26 step25: indirectBrByte / cxtind3 double-indirect (2 ctx, 20-bit)
+DirectStateMap dcsm2; // v26 step25: word00 + indirectBrByte + worcxt0.Word(1,2) (3 ctx, 26-bit)
+DirectStateMap dcsmN; // v26 step25: h + worcxt.Code(1..3) + fccxt (3 ctx, 25-bit)
+#endif
 
 SparseMatchModel smatch; // 2 inputs to fp
 
@@ -3690,6 +3740,17 @@ void PredictorInit() {
 
     maps1.Init(16,8); // v26 step15
     maps2.Init(16,8); // v26 step15
+
+#if FXCM_DCSM
+    // v26 step25: dcsm/dcsm0 trimmed 28->27 bit PREEMPTIVELY (map trim list: -256 MiB vs
+    // v26's 28-bit pair; RAM headroom is tight after steps 23/24)
+    const int dccount=6;
+    dcsm.Init(27,dccount-1, &STA7[0][0] );
+    dcsm0.Init(27,dccount, &STA7[0][0] );
+    dcsm1.Init(20,2, &STA7[0][0] );
+    dcsm2.Init(26,3, &STA7[0][0] );
+    dcsmN.Init(25,3, &STA7[0][0] );
+#endif
 
     // Mixers      size,  shift, err, errmul   // v26 step23: params from the v26 Init table verbatim
     mxA[0].Init(  0x8000,  75,  8, 14); // general (M 2048->0x8000, ctx widened to 12-bit streams)
@@ -3732,7 +3793,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(474+19+15)&-16; // v26 step20/23: 474 CM adds + 19 non-CM adds (match 7, scm 6, maps 4, rcm 1, lstm 1) -> N=496; step23/24 outputs go to mxInputs2/mxInputs4, not here (S=800 headroom kept for step 25)
+    x.mxInputs1.ncount=(474+19+(FXCM_DCSM?24:0)+15)&-16; // v26 step20/23/25: 474 CM adds + 19 non-CM adds (match 7, scm 6, maps 4, rcm 1, lstm 1) + 24 dcsm adds (5 mix outputs + 19 pre1) -> N=528 (496 with FXCM_DCSM=0); S=800
     x.mxInputs2.ncount=32; // v26 step23: fixed L1 dot width (19 live: mxA[0..16] + mxA[18] + lstm/2; tail stays zero)
     x.mxInputs4.ncount=16; // v26 step23: fixed L2 dot width (6 live: mxA[17] + mxA1[0..4]; tail stays zero)
 
@@ -4275,7 +4336,7 @@ U8 mstate=0;                 // v26 step24: STA2 bit-history of the global strea
 // Main context parsing and prediction
 int modelPrediction(int c0,int bpos,int c4){
     int i,c;
-    U32 h,j;
+    U32 j; // v26 step25: h promoted to global
 
     if (bpos) xmlS=xml.p(); // v26 step19 (bpos 1-7 leg; the bpos==0 leg runs post-parse, before the cmC44 sets)
 
@@ -5346,7 +5407,34 @@ int modelPrediction(int c0,int bpos,int c4){
 
     //indirectBrByte
     const int c0b=c0<<(8-bpos);
-    
+#if FXCM_DCSM
+    // v26 step25: DirectStateMap bank, 19 contexts, per-bit sets (v26 order/recipes verbatim)
+    dcsm.set((word0*191)*256+x.c0,x.y);
+    dcsm.set((word0*191+worcxt.Word(1))*256+x.c0,x.y);
+    dcsm.set((word0*191+worcxt.Word(2))*256+x.c0,x.y);
+    dcsm.set((word0*191+worcxt.Word(3))*256+x.c0,x.y);
+    dcsm.set((word0*191+worcxt.Word(4))*256+x.c0,x.y);
+
+    dcsm2.set((word00*191+indirectBrByte)*256+x.c0,x.y);
+    dcsm2.set((word00*191+worcxt0.Word(1)+indirectBrByte)*256+x.c0,x.y);
+    dcsm2.set((word00*191+worcxt0.Word(2)+indirectBrByte)*256+x.c0,x.y);
+
+    //indirectBrByte
+    dcsm1.set( (indirectBrByte)*256+x.c0,x.y);
+    dcsm1.set( (cxtind3)*191+x.c0,x.y);
+
+    dcsm0.set((h+worcxt1.Word(1))*256+x.c0,x.y);
+    dcsm0.set((h+worcxt1.Word(2))*256+x.c0,x.y);
+    dcsm0.set((h+worcxt1.Word(3))*256+x.c0,x.y);
+    dcsm0.set((h+worcxt1.Word(4))*256+x.c0,x.y);
+    dcsm0.set((h+worcxt1.Word(5))*256+x.c0,x.y);
+    dcsm0.set((h+worcxt1.Word(6))*256+x.c0,x.y);
+
+    dcsmN.set((h+worcxt.Code(1)+fccxt.cxt )*256+x.c0,x.y);
+    dcsmN.set((h+worcxt.Code(2)+fccxt.cxt)*256+x.c0,x.y);
+    dcsmN.set((h+worcxt.Code(3)+fccxt.cxt)*256+x.c0,x.y);
+#endif
+
     maps1.mix(); // v26 step15 (+2 inputs)
     maps2.mix(); // v26 step15 (+2 inputs)
     scmA[0].mix(sscmrate);
@@ -5408,7 +5496,13 @@ int modelPrediction(int c0,int bpos,int c4){
     for (int i=0;i<9;i++) cmcr[i].mix();  // v26 step18
     for (int i=0;i<4;i++) cmcr2[i].mix(); // v26 step18
     rcmA[0].mix();
-    // (v26 step25: dcsm mixes land here in exp/030)
+#if FXCM_DCSM
+    dcsm.mix();  // v26 step25: ONE combined order-w prediction each (+5 exported inputs total)
+    dcsm0.mix();
+    dcsm1.mix();
+    dcsm2.mix();
+    dcsmN.mix();
+#endif
 
     mstate=STA2[mstate][x.y]; // v26 step24
 
@@ -5717,7 +5811,7 @@ inline Predictor::Predictor()  {
     statetable.Init(33, 31, 31, 24, 20, 4, 33,&STA5[0][0]);
     statetable.Init(28, 29, 30, 30, 23, 3, 22,&STA6[0][0]);
     statetable.Init(28, 29, 33, 23, 23, 6, 14,&STA7[0][0]);
-    pre2(&STA7[0][0]);
+    // v26 step25: pre2() runtime fill removed; pre1[] is the v26 const table
     // Load dictionary
     dosym();
     PredictorInit();
