@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16)
+int num_models = 439+1-2-7-2-4+5+4+15+30;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -212,7 +212,7 @@ struct BlockData {
     }
 };
 
-BlockData<528+32> x; //maintains current global data block
+BlockData<528+64> x; //maintains current global data block // v26 step17: +32 input headroom (S=592 >= N=576)
 
 
 // ilog(x) = round(log2(x) * 16), 0 <= x < 256
@@ -3399,7 +3399,7 @@ U32 t[14];
 int c1,c2,c3;
 U8 words,spaces,numbers;
 U32 word0,word00,wshift,x4,x5,isMatch,firstWord,linkword,senword; // v26 step13: word1..3 dropped (worcxt0 stream replaces them)
-U32 numberA=0; // v26 step14: rolling hash of the current digit run (number word)
+U32 xword1=0,numberA=0; // v26 step14: numberA digit-run hash; step17: xword1 similar-sentence word
 bool skipM1=false; // v26 step9: long-match context skipping flag
 bool skipSeeExternal=false; // v26 step11: inside See also/References/Bibliography/External links section
 bool isCategory=false;      // v26 step11: inside [category:...] link
@@ -3552,7 +3552,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18)&-16; // v26 step15: +4 StationaryMap; step16: +18 cmC2[20] -> N=528 (S=560)
+    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36)&-16; // v26 step15: +4 StationaryMap; step16: +18 cmC2[20]; step17: +36 cmC2[18]/[19] -> N=576 (S=592)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -3599,6 +3599,8 @@ void PredictorInit() {
 
     cmC2[16].Init( 1*4096*4096/2,1|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
     cmC2[17].Init( 2*4096*4096,2|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
+    cmC2[18].Init( 4*4096*4096,5|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]); // v26 step17
+    cmC2[19].Init( 2*4096*4096,1|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]); // v26 step17
     cmC2[20].Init( 8*4096*4096,3|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]); // v26 step16
 
     cmC1[6].Init(1*16*4096,1|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0,0,&st2_p1[0]);
@@ -4737,6 +4739,70 @@ int modelPrediction(int c0,int bpos,int c4){
             cmC2[20].set(hash(wt3cxt,worcxt2.Word(1),(stream3b & 511)));  //hash of current sentance word types with last worcxt2 word context and last 3 3bit words // v26 step16
             cmC2[20].set(hash(wt3cxtW,word0,(stream3b & 63)));            //hash of current sentance word codewords (no Nouns) with current word contex // v26 step16
         }
+        // Sentence contexts // v26 step17 (cmC4[8] slots land with step 20)
+        WordsContext *lastwor,*lastwor1,*lastwor3;
+        if (colcxt.lastfc()=='*') {
+            lastwor=sencxt.Sentence(1);    // current word index in Sentence 1
+            lastwor1=sencxtL.Sentence(2);  // current word index in Sentence 2
+            lastwor3=sencxt.Sentence(1);   // current word index in Sentence 3
+        } else if (colcxt.nlChar==WIKITABLE) {// table, FIXME for single multiline
+            lastwor=sencxtT.Sentence(2);
+            lastwor1=sencxtT.Sentence(4);
+            lastwor3=sencxtT.Sentence(6);
+        } else {
+            lastwor=sencxt.Sentence(1);  // current word index in Sentence 1
+            lastwor1=sencxt.Sentence(2); // current word index in Sentence 2
+            lastwor3=sencxt.Sentence(3); // current word index in Sentence 3
+        }
+        U32 lastWordMT=lastwor->LastR(1,worcxt.wordcount, Verb); // Last Verb in Sentence if found or Word(1+)
+        U32 simNoun=0,simVerb=0;
+        U32 xword=0;
+        if (isParagraph==0) {
+            if(colcxt.lastfc()=='*') {
+                WordsContext *lastworL=sencxtL.Sentence(1);
+                xword=lastworL->WordR(worcxt.wordcount);
+            }
+            else if (colcxt.lastfc()==SQUAREOPEN) {
+                WordsContext *lastworCL=sencxtCL.SimilarSentence(&worcxt,worcxt.wordcount);
+                xword=lastworCL->WordR(worcxt.wordcount);
+            } else
+                xword=lastwor1->WordR(worcxt.wordcount);
+        }
+        else xword=lastwor->LastR(1,worcxt.wordcount, Noun);
+
+        xword1=lastwor3->WordR(worcxt.wordcount);
+
+        cmC2[18].set(word00*1471+ lastwor->WordR(worcxt.wordcount)+lastWordMT +(stream3b & 511)*191+BrFcIdx); //40k
+        cmC2[18].set(word00*1471+ xword+(stream3bR & 511)*191+BrFcIdx);//needs work, combined with above 17k ---57k
+
+        if (worcxt.wordcount) {
+            simiwor=sencxt.SimilarSentence(&worcxt,worcxt.wordcount);
+            xword1=simiwor->WordR(worcxt.wordcount);
+            simNoun=simiwor->LastR(1,worcxt.wordcount, Noun);
+            simVerb=simiwor->LastR(1,worcxt.wordcount, Verb);
+        }
+        // List
+        if (worcxt.wordcount && (colcxt.lastfc()=='*' || colcxt.lastfc(1)=='#')) {
+            simiwor=sencxtL.SimilarSentence(&worcxt,worcxt.wordcount);
+            xword1=simiwor->WordR(worcxt.wordcount);
+        // Tables
+        }else if (worcxt.wordcount && colcxt.nlChar==WIKITABLE) {
+            simiwor=sencxtT.SimilarSentence(&worcxt,worcxt.wordcount);
+            xword1=simiwor->WordR(worcxt.wordcount);
+        // Wiki links
+        }else if (worcxt.wordcount && colcxt.lastfc()==SQUAREOPEN) {
+            simiwor=sencxtCL.SimilarSentence(&worcxt,worcxt.wordcount);
+            xword1=simiwor->WordR(worcxt.wordcount);
+        }
+
+        cmC2[18].set(word0*83+worcxt1.Word(1)+xword1*191); // needs work 25k disable before census
+        cmC2[18].set(h+worcxt.Word(2)*83+xword1*53+(stream3b & 511)+FcIdx+((indirectBrByte>>0)&0x7ff)*191); // seems ok 56k?
+        cmC2[18].set(h+simVerb+simNoun+linkword+fccxt.cxt );//30k disable before census
+
+        if (brcxt.cxt==LESSTHAN || (colcxt.lastfc()!=FIRSTUPPER && colcxt.lastfc()!='*' && colcxt.lastfc()!=APOSTROPHE)) cmC2[19].sets();
+        else cmC2[19].set(h+worcxt0.Word0(3)+worcxt0.Word0(4));
+        // end // v26 step17
+
         // current word and word(1) type upto preffix(not included), paragraph word(1) 
         cmC1[6].set(h+(worcxt.Type(1)&(0x1FF))+worcxt1.Word(1)); 
         if (isMatch>61) cmC2[6].sets(); else cmC2[6].set(((stream2b&15)<<16)+(t[2]&0xffff));  // o2 // v26 step9
@@ -5027,8 +5093,10 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC[5].mix();
     cmC2[16].mix();
     cmC2[17].mix();
+    cmC2[19].mix(); // v26 step17
     cmC1[6].mix();
     cmC1[7].mix();
+    cmC2[18].mix(); // v26 step17
     cmC2[20].mix(); // v26 step16
     rcmA[0].mix();
 
