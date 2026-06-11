@@ -21,3 +21,10 @@ Every experiment gets a row here — **including null and negative results**. De
 |----|------|--------------|------|---------|-----------|---------------|-----------|----------|---------|-------|
 | 000a | 2026-06-10 | main (mmap fix) | T0 | input2 (930,723 B) | 180,611 | baseline | 5m47s c / 5m50s d | n/a | ✅ round-trip OK | lab1, PGO build, S1=441,983 |
 | 000b | 2026-06-10 | main (mmap fix) | T3 | enwik9 | *running* | baseline anchor | est. ~65–75 h | — | ⏳ launched | lab1 core 0, /mnt/work/baseline, expect S2≈110.35 MB |
+| 001 | 2026-06-11 | main | T1 | text_10M | 1,065,537 | baseline | 50m54s | 5.99 GB | ✅ anchor | lab1 core 2 (concurrent w/ baseline) |
+| 002 | 2026-06-11 | main SEED=1 | T0 | text_1M | 71,314 | −31 B vs 71,345 | 8m38s | 5.73 GB | ✅ noise probe | spot1; seed⊕machine confounded → T0 noise floor ≈ tens of bytes; decision threshold ≥300 B |
+| 003 | 2026-06-11 | main | T0 | text_1M | *running* | — | — | — | ⏳ | spot1 cross-machine replication (vs lab1 71,345) |
+| 004 | 2026-06-11 | main | T1-mid | text_mid10M | *running* | — | — | — | ⏳ | spot1, mid-file anchor |
+
+### M1/M2 progress (kaitz fxcm v26 standalone)
+- v26 builds on Linux (3-line port, `standalone/`). Compress works (coded_1M → 101,704 B; coded_100k repro). **Decompress segfaults** at `procWord` (fxcm.cpp:4157, bogus codeword → `dictWLen[]` OOB) — encoder/decoder divergence on Linux/clang-17. UBSan flags signed-overflow/shift UB at :2029/:5163/:5235. `-fwrapv` alone does NOT fix. Sanitized round-trip + `-O0` test in progress. Working theory: optimizer-exploited UB → asymmetric miscompile; plausibly related to kaitz's integration determinism bug.
