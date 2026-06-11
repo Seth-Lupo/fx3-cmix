@@ -2138,10 +2138,11 @@ struct WordsContext {
     vec<U8,64*4> capital; //  max 64*4
     vec<U32,64*4> codeword;   // v26 step10: codeword index per word
     U32 fword,ftype;      // First word of a sentence
-    U8 pbyte;             // Current byte before word
+    U8 pbyte,tpbyte;      // Current byte before word; tag-start byte ('<') // v26 step13: tpbyte
     int wordcount,upper;
     U32 codesum;          // v26 step10
     int ref;
+    int worInPar=0,worInLink=0; // v26 step13: words-in-paragraph/-link counts (write-only until step 17)
     void Init() {
         vec_new(&sbytes);
         vec_new(&type);
@@ -2155,30 +2156,54 @@ struct WordsContext {
         vec_reset(&codeword); // v26 step10
         fword=pbyte=wordcount=upper=ftype=ref=0;
         codesum=0;            // v26 step10
+        tpbyte=0;             // v26 step13
+        worInPar=0,worInLink=0; // v26 step13
     }
-    void Set(U8 b,int a=0){
-        pbyte=b;upper=a;
+    void Set(U8 b,int a=0,U8 g=0){ // v26 step13: 3rd arg feeds tpbyte
+        pbyte=b;upper=a;tpbyte=g;
     }
-    void  __attribute__ ((noinline)) Update(U32 w,U8 b, U32 t,U32 s,U32 cw=0) { // v26 step10: optional codeword
+    void  __attribute__ ((noinline)) Update(U32 w,U8 b, U32 t,U32 s,U32 cw=0,int worIn=0) { // v26 step10: optional codeword; v26 step13: worIn
         if (fword==0) fword=w;
         vec_push(&sbytes,U16(pbyte*256+b));  // Surrounding bytes
         vec_push(&type,t);
         vec_push(&stem,s);
         vec_push(&capital,U8(upper));
         vec_push(&codeword,cw);  // v26 step10
-        pbyte=0;wordcount++;
+        pbyte=tpbyte=0;wordcount++; // v26 step13: also clear tpbyte
         codesum=codesum+cw;      // v26 step10
         if (ftype==0 && t) ftype=t;
+        if (worIn==1) worInLink++;      // v26 step13 (write-only until step 17)
+        else  if (worIn==0) worInPar++; // v26 step13
     }
     void  __attribute__ ((noinline)) Remove(){
         const int num=vec_size(&stem);
         if (num) {
-            vec_pop(&sbytes),vec_pop(&type),vec_pop(&stem),vec_pop(&capital),vec_pop(&codeword),wordcount--; // v26 step10
+            vec_pop(&sbytes),vec_pop(&type),vec_pop(&stem),vec_pop(&capital),vec_pop(&codeword); // v26 step10
+            if (wordcount)wordcount--; // v26 step13: v26 guards against negative wordcount
         }
     }
     U32  __attribute__ ((noinline)) Word(int i=1){
         const int num=vec_size(&stem);
         if (num>=i) return vec_at(&stem,num-(i));
+        else return 0;
+    }
+    // v26 step13: previous-word hash with position multiplier ladder;
+    // extra multiplier when the word ended at LF (aged via the wshift block)
+    U32  __attribute__ ((noinline)) Word0(int i=1){
+        const int num=vec_size(&stem);
+        U8 lb=sBytes(i)&0xff;
+        int idx=0;
+        if (i==4) idx=37*47*53*83;
+        else if (i==3) idx=47*53*83;
+        else if (i==2) idx=53*83;
+        else if (i==1) idx=83;
+        if (lb==LF){
+            if (i==3) idx=idx*37;
+            else if (i==3) idx=idx*47; // unreachable, kept as in v26
+            else if (i==2) idx=idx*53;
+            else if (i==1) idx=idx*83;
+        }
+        if (num>=i) return U32(vec_at(&stem,num-(i)))*U32(idx);  // unsigned: wraparound hash, was signed-overflow UB (v26 fxcm.cpp:2047)
         else return 0;
     }
     U16  __attribute__ ((noinline)) sBytes(int i=1){
@@ -3253,11 +3278,14 @@ U32 t[14];
 
 int c1,c2,c3;
 U8 words,spaces,numbers;
-U32 word0,word00,word1,word2,word3,wshift,x4,x5,isMatch,firstWord,linkword,senword;
+U32 word0,word00,wshift,x4,x5,isMatch,firstWord,linkword,senword; // v26 step13: word1..3 dropped (worcxt0 stream replaces them)
 bool skipM1=false; // v26 step9: long-match context skipping flag
 bool skipSeeExternal=false; // v26 step11: inside See also/References/Bibliography/External links section
 bool isCategory=false;      // v26 step11: inside [category:...] link
 bool isPageStarted=false;   // v26 step11: text tag seen since last page end
+bool inBR=false;            // v26 step13: word continues across ']' ([dog]s)
+bool isHTTAG=false;         // v26 step13: inside html/xml tag words
+bool wasTag=false;          // v26 step13: tag seen on this line
 U32 lastPTOP=-1,pageParag=0,pageSent=0; // v26 step12: short-page shift register + per-page counts (consumed by step 22's cmC[1] reset cadence)
 bool isLongTOP=false;       // v26 step12 (write-only in v26 too)
 enum PageState { // v26 step12
@@ -3338,6 +3366,8 @@ ColumnContext colcxt;
 WordsContext worcxt;
 WordsContext worcxt1;
 WordsContext worcxt2;
+WordsContext worcxt3; // v26 step13: tag words
+WordsContext worcxt0; // v26 step13: undecoded words
 BracketContext<U16> htcxt;
 
 //DirectStateMap dcsm;  //1x5 inputs to fp
@@ -3442,6 +3472,8 @@ void PredictorInit() {
     worcxt.Init();
     worcxt1.Init();
     worcxt2.Init();
+    worcxt3.Init(); // v26 step13
+    worcxt0.Init(); // v26 step13
     htcxt.Init(&html[0],2,false,0xfff);
 
     //smatch.Init();  // v26 port: SparseMatchModel removed
@@ -3773,7 +3805,7 @@ void setbufstem(char c){
     // Ignore wiki link and maintain current word: [dog]s
     // Disabled when in http link
     else if ((*cWord).Length()>0  &&(c==SQUARECLOSE ) && fccxt.cxt!=HTLINK && isParagraph) {
-     ;
+     inBR=true; // v26 step13
     }
     else if ((*cWord).Length()>0) {
         bool res=StemmerEN.Stem(cWord);
@@ -3800,15 +3832,27 @@ void setbufstem(char c){
             worcxt.Set(sb>>8);
         
         }
+        if (isHTTAG) ; // v26 step13
+        else if (worcxt.tpbyte==LESSTHAN && isHTTAG==false && qocxt.cxt==0) {
+            isHTTAG=wasTag=true; // v26 step13
+        }
+        if (isHTTAG) {
+            worcxt3.Update(word0,c1,0,whash,lastCW); // v26 step13: tag word stream
+        }
         // Sentence, all words.
-        worcxt.Update(word0,c1,(*pWord).Type,whash,lastCW); // v26 step10 (v26's extra worIn arg deferred to step 17)
+        worcxt.Update(word0,c1,(*pWord).Type,whash,lastCW,(brcxt.cxt==SQUAREOPEN || c1==SQUARECLOSE|| c2==SQUARECLOSE|| inBR)?1:0); // v26 step10+step13: worIn arg
+        inBR=false; // v26 step13
         // Paragraph, most words, exclude Conjunction etc.
-        if (((*pWord).Type&(Conjunction+Article+Male+Female+Number+ConjunctiveAdverb))==0  && brcxt.cxt!=LESSTHAN) worcxt1.Update(word0,c1,(*pWord).Type,whash);
+        if (((*pWord).Type&(Conjunction+Article+Male+Female+Number+ConjunctiveAdverb))==0  && isHTTAG==false) worcxt1.Update(word0,c1,(*pWord).Type,whash); // v26 step13: gate brcxt!=LESSTHAN -> !isHTTAG
         // Stream, words with type, exclude Conjunction etc.
-        if (((*pWord).Type&(Conjunction+Article+Male+Female+Adposition+Number+AdverbOfManner+ConjunctiveAdverb))==0  && brcxt.cxt!=LESSTHAN) {
+        if (((*pWord).Type&(Conjunction+Article+Male+Female+Adposition+Number+AdverbOfManner+ConjunctiveAdverb))==0  && (isHTTAG==false)) { // v26 step13: gate brcxt!=LESSTHAN -> !isHTTAG
             if ((*pWord).Type) worcxt2.Update(word0,c1,(*pWord).Type,whash,lastCW); // v26 step10
         }
     }
+    if (c==LF && wasTag) { // v26 step13
+        wasTag=isHTTAG=false;
+    }
+    if (c=='>') isHTTAG=false; // v26 step13
 }
 // Set decoded char to buffer and update stemmer string
 void __attribute__ ((noinline)) setbuf(char c){
@@ -3877,6 +3921,7 @@ int modelPrediction(int c0,int bpos,int c4){
             }
         }
         if ((x.c4&0xffffff)==(((EQUALS*256)+EQUALS)*256+EQUALS)) isLongTOP=true; // v26 step12
+        if (worcxt.wordcount<6 &&colcxt.isTemp && c1==CURLYCLOSE)worcxt.removeWordsL(8,CURLYOPENING,CURLYCLOSE); // v26 step13: template words dropped at '}'
         // Column context update
         colcxt.Update(c1,c4&0xffffff);
         // Bracket context update
@@ -3937,7 +3982,8 @@ int modelPrediction(int c0,int bpos,int c4){
                 else reChar=c3;
             }
                 else if (c2=='/' && c3==LESSTHAN) reChar=c3;  // </ to <
-                 worcxt.Set(reChar,c2==FIRSTUPPER?1:0); 
+                 worcxt.Set(reChar,c2==FIRSTUPPER?1:0,c2==LESSTHAN?c2:((c3==LESSTHAN && c2=='/')?c3:0)); // v26 step13: tag-start byte
+                 worcxt0.Set(reChar,c2==FIRSTUPPER?1:0); // v26 step13
                  worcxt1.Set(reChar);
             }
 
@@ -4016,10 +4062,9 @@ int modelPrediction(int c0,int bpos,int c4){
             if (word00   && !(fccxt.cxt==SQUAREOPEN)) word00=0;
             if (word0){
                 // Skip some word tpyes in main word order
-                if ((x.blpos>463139793) || ((*pWord).Type&(ConjunctiveAdverb+Conjunction))==0 ){
-                    word3=word2*47;
-                    word2=word1*53;
-                    word1=word0*83;
+                // v26 step13: blpos 463139793 gate removed; word1..3 scalars replaced by the worcxt0 stream
+                if (((*pWord).Type&(ConjunctiveAdverb+Conjunction))==0){
+                    worcxt0.Update(word0,c1!=LF?c1:0,0,word0);
                 }
                 if (worcxt.Type(1)==Number){
                     stream3bR=(stream3bR<<7)+1;
@@ -4069,16 +4114,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 stream3bRMask2=stream3bRMask1;
                 stream3bMask1=stream3bMask;
                 stream3bMask=stream2bMask=stream3bRMask1=0;
-            }else if (c1==VERTICALBAR && colcxt.isTemp){ 
-                // In template mode set last word end char to VERTICALBAR
-                U16 sb=worcxt.sBytes(1);
-                U32 w=worcxt.Word(1);
-                U32 t=worcxt.Type(1);
-                U8 ca=worcxt.Capital(1);
-                worcxt.Remove();
-                worcxt.Set(sb>>8,ca);
-                worcxt.Update(w,c1,t,w);
-            }
+            } // v26 step13: VERTICALBAR template re-push removed (v26 drops template words at '}' instead, see removeWordsL above)
             // Detect text, nowiki, math, pre tag boundaries, (ref tag not used)
             if (buffer1(6)==charSwap(LESSTHAN) && buffer1(5)== 't'&& isText==false && c1==SPACE  &&cwSTR==cwTEXT) isText=true,cwSTR=0x10000; // v26 step10
 
@@ -4141,7 +4177,8 @@ int modelPrediction(int c0,int bpos,int c4){
                 stream4b=((stream4b&0xffff0)<<8)+(stream4b&0xf);
                 stream2bR= stream2bR&0xffffffc0;
                 if (c1=='.') {
-                    wshift=1;
+                    if (fccxt.cxt!=SQUAREOPEN) wshift=1; // v26 step13: no aging inside [links]
+
                     // We ignore sentance ending dot when we are in [], (), table or line is a list.
                     if (!(fccxt.cxt==SQUAREOPEN  ||  fccxt.cxt=='(' ||colcxt.nlChar==WIKITABLE || colcxt.lastfc()=='*' )) worcxt.Reset();
                     senword=0; // Age words(stream) and reset word context
@@ -4249,6 +4286,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 brcxt.Reset();
                 qocxt.Reset();
                 htcxt.Reset();
+                worcxt0.Reset(); // v26 step13
                 isLongTOP=false; // v26 step12
             }
             fc=colcxt.lastfc();
@@ -4294,7 +4332,7 @@ int modelPrediction(int c0,int bpos,int c4){
         if (c1==COLON &&(cwCOLON==cwCATEGORY ||cwCOLON==cwUSER ||cwCOLON==cwWIKIPEDIA)) { // v26 step10/step11 (PState=PCategory/PStateH deferred to step 12, worcxt0.Remove to step 13)
             if (cwCOLON==cwCATEGORY) PState=PCategory,isCategory=true; // v26 step11+step12
             PStateH=hash(PStateH,PState,0); // v26 step12
-            fccxt.Update(LF),worcxt.Remove();
+            fccxt.Update(LF),worcxt.Remove(),worcxt0.Remove(); // v26 step13: also drop from undecoded stream
         }
         // Probably math operator, ignore
         if (c1==SPACE && c2==LESSTHAN) fccxt.Update(GREATERTHAN); 
@@ -4358,10 +4396,12 @@ int modelPrediction(int c0,int bpos,int c4){
         //  < >
         worcxt.removeWordsL(8,'(',')');
         worcxt1.removeWordsL(8,'(',')');
+        worcxt0.removeWordsL(8,SQUAREOPEN,VERTICALBAR); // v26 step13
         worcxt.removeWordsL(8,SQUAREOPEN,VERTICALBAR);
         worcxt1.removeWordsL(8,SQUAREOPEN,VERTICALBAR);
         worcxt.removeWordsL(8,LESSTHAN,COLON);
         if (colcxt.isTemp==true) worcxt.removeWordsR(10,EQUALS,VERTICALBAR);
+        worcxt0.removeWordsL(8,LESSTHAN,GREATERTHAN); // v26 step13
         worcxt.removeWordsL(8,LESSTHAN,GREATERTHAN);
         worcxt1.removeWordsL(8,LESSTHAN,GREATERTHAN);
 
@@ -4429,7 +4469,7 @@ int modelPrediction(int c0,int bpos,int c4){
         // Contexts
 
         // Set run context with word(3), current byte and bit3word(1-5)
-        rcmA[0].set(word3*53+c1+193 * (stream3b & 0x7fff),c1);
+        rcmA[0].set(worcxt0.Word0(3)+c1+193 * (stream3b & 0xfff),c1);// needs work // v26 step13: worcxt0 stream + narrower mask
         // Word stream cm(4-5)
         if (col<2 || fc==SPACE) {
             cmC2[4].sets(); 
@@ -4441,7 +4481,7 @@ int modelPrediction(int c0,int bpos,int c4){
             // & is line first char (HTML)
             // escaped UTF8
             if (colcxt.lastfc()=='&' || utf8left) cmC2[4].sets();
-            else cmC2[4].set(h+word1);
+            else cmC2[4].set(h+worcxt0.Word0(1)); // v26 step13
 
             if (brcxt.cxt==LESSTHAN || skipSeeExternal || colcxt.nlChar==WIKITABLE) cmC2[17].sets(); else cmC2[17].set(worcxt1.Word(1)*53+worcxt1.Word(2)*11+h+(lastWT&0xf)); // v26 step11
         }
@@ -4449,7 +4489,7 @@ int modelPrediction(int c0,int bpos,int c4){
             cmC2[5].sets(); 
         } else {
             if (isMatch>61) cmC2[5].sets(); // v26 step9
-            else cmC2[5].set(h+ word2*71);
+            else cmC2[5].set(h+worcxt0.Word0(2)*71); // v26 step13
         }
         if (fc==SPACE || brcxt.cxt==LESSTHAN) {
                cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets();
@@ -4610,11 +4650,12 @@ int modelPrediction(int c0,int bpos,int c4){
         }
 
         // Byte stream of x4, msb of byte(4), 4 msb bits of byte(2,3) and full byte(1)
-        if (isCategory) cmC2[12].sets(); else cmC2[12].set((x4&0x80f00000)+((x4&0x0000f0ff) << 12) ); // v26 step11 (v26 also ORs brcxt.cxt==LESSTHAN, step 13)
+        if (brcxt.cxt==LESSTHAN||isCategory) cmC2[12].sets(); else cmC2[12].set((x4&0x80f00000)+((x4&0x0000f0ff) << 12) ); // v26 step11+step13
         // Paragraph or column. 
         // In Paragraph: disabled when escaped utf8, html link, math
         // In Column: when col is max(31) use last two bytes only otherwise add above bytes
-        if (isParagraph==1) {
+        if (brcxt.cxt==LESSTHAN ) cmC2[12].set(h+worcxt3.Word(1) *53 *79+worcxt3.Word(2) *53*47 *71); // v26 step13: tag words
+        else if (isParagraph==1) {
             // word
             if (c1==ESCAPE || fccontext==HTLINK || fccontext==CURLYOPENING || isMath|| isPre) {
                 cmC2[12].sets();
@@ -4682,8 +4723,12 @@ int modelPrediction(int c0,int bpos,int c4){
         scmA[5].set(brcontext);
         //scmA[6].set(isParagraph+ 2*((stream3bR&0x3f)) );  // v26 port: SSCM removed
 
-        if (wshift||c1==LF) {
-            word3=word3*47, word2=word2*53, word1=word1*83;
+        if (wshift||c1==LF) { // v26 step13: age worcxt0 word(1) by re-pushing it with LF end byte (Word0 reads this)
+            U16 sb=worcxt0.sBytes(1);
+            U32 w=worcxt0.Word(1);
+            worcxt0.Remove();
+            worcxt0.Set(sb>>8,0);
+            worcxt0.Update(w,LF,0,w);
             wshift=0;
             if (c1==LF)sVerb=0;
         }
