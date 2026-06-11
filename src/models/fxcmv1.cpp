@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12)
+int num_models = 439+1-2-7-2-4+5+4;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -1620,6 +1620,50 @@ struct  APM {
 };
 
 short pre1[256];
+// v26 step15: dt-curve U32 counter map; 2 mixer inputs per instance, both exported
+struct StationaryMap {
+    U32 *Data;
+    int Context, Mask, Stride, bCount, bTotal, B, N;
+    U32 *cp;
+    int Multiplier;
+    void Init(int BitsOfContext, int InputBits=8, int mul=8,int Rate=0) {
+        Multiplier=mul;
+        N=((1ull<<BitsOfContext)*((1ull<<InputBits)-1));
+        Context=0, Mask=(1<<BitsOfContext)-1, Stride=(1<<InputBits)-1, bCount=0, bTotal=InputBits, B=0;
+        assert(InputBits>0 && InputBits<=8);
+        assert(BitsOfContext+InputBits<=24);
+        alloc(Data,N);
+        for (int i=0; i<N; ++i)
+        Data[i]=(0x7FF<<20)|min(1023,Rate);
+        cp=&Data[0];
+    }
+    void Free() {
+        free(Data);
+    }
+    void set(U32 ctx) {
+        Context = (ctx&Mask)*Stride;
+        bCount=B=0;
+    }
+    void mix() {
+        // update
+        int Prediction;
+        U32 p0=cp[0];
+        int n=p0&1023, pr=p0>>13;  // count, prediction
+        p0+=(n<1023);
+        p0+=(((x.y<<19)-pr))*dt[n]&0xfffffc00;
+        cp[0]=p0;
+        // predict
+        B+=(x.y && B>0);
+        cp=&Data[Context+B];
+        Prediction = (*cp)>>20;
+        x.mxInputs1.add((stretch(Prediction)*Multiplier)/32);//      1/4    8/32
+        x.mxInputs1.add(((Prediction-2048)*Multiplier)/(32*2));//    1/8    8/64
+        bCount++; B+=B+1;
+        if (bCount==bTotal)
+        bCount=B=0;
+    }
+};
+
 struct DirectStateMap {
   StateMap *sm;
   int *cxt;
@@ -3354,6 +3398,8 @@ ContextMap1 cmC1[8];
 // large state memory, per context max 14 uniqe contexts state sets
 // for large amount of large contexts
 ContextMap2 cmC2[18];
+StationaryMap maps1; // v26 step15
+StationaryMap maps2; // v26 step15
 APM<256>  apmA0;
 APM<0x8000*2>  apmA1;
 APM<0x8000*2>  apmA2;
@@ -3393,6 +3439,9 @@ void PredictorInit() {
     scmA[5].Init(8); 
     //scmA[6].Init(7);   // v26 port: SSCM removed
 
+    maps1.Init(16,8); // v26 step15
+    maps2.Init(16,8); // v26 step15
+
     // Mixers      size,  shift, err, errmul 
     mxA[0].Init(    2048, 237,  8, 69); // general
     mxA[1].Init(   6*256, 204,  8, 19); // ...
@@ -3415,7 +3464,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2)&-16;
+    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4)&-16; // v26 step15: +4 StationaryMap inputs (still 512)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -4747,11 +4796,16 @@ int modelPrediction(int c0,int bpos,int c4){
         AH2=hash(19,     x5&0x80ffff);
         wrtcxt=deccode; // set cmix FP mixer context
         mxA[8].cxt=deccode;
+
+        maps1.set((word0*191)); // v26 step15
+        maps2.set(deccode>>2);  // v26 step15
     }
 
     //indirectBrByte
     const int c0b=c0<<(8-bpos);
     
+    maps1.mix(); // v26 step15 (+2 inputs)
+    maps2.mix(); // v26 step15 (+2 inputs)
     scmA[0].mix(sscmrate);
     //scmA[1].mix(sscmrate);  // v26 port: SSCM removed
     //scmA[2].mix(sscmrate);  // v26 port: SSCM removed
