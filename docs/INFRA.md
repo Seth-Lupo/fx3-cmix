@@ -7,9 +7,12 @@ M1 Mac (ARM, darwin). **Cannot build or benchmark x86-64 submission binaries.** 
 | VM | IP | Size | Role |
 |---|---|---|---|
 | lab1 | 20.29.69.113 | D4ds_v4 on-demand | core0: enwik9 baseline anchor (→~Jun13); core3: v26 standalone 586MB RT (/mnt/work/v26full); /mnt/work/proxy has all slices + full streams |
-| exp1 | 130.131.243.31 | E2s_v3 on-demand | experiment lane, SINGLE-TENANT for 25-step builds (~8GB RSS); auto-shutdown 09:00 UTC daily (disable for overnight jobs) |
+| exp1 | 130.131.243.31 | E2s_v3 on-demand | experiment lane, SINGLE-TENANT for 25-step builds (~8GB RSS); auto-shutdown DISABLED 2026-06-11 for overnight T2 A/B (re-enable when done: `az vm auto-shutdown -g hutter-lab -n exp1 --time 0900`) |
+| spot2 | 20.29.114.158 | E2s_v3 spot | T0/T1 probe lane (eviction-tolerant queue at /mnt/work/probe_queue.sh, ledger-skip restart) |
 
-spot1 deleted 2026-06-11 (3 evictions; user approved on-demand swap). SSH user `hutter`, key ~/.ssh/id_ed25519; lab1's pubkey is in exp1's authorized_keys for direct scp. Eviction/rebuild routine: provision.sh + setup.sh SKIP_ENWIK9=1 + scp slices from lab1.
+spot1 deleted 2026-06-11 (3 evictions; user approved on-demand swap). SSH user `hutter`, key ~/.ssh/id_ed25519; lab1's pubkey is in exp1's authorized_keys for direct scp (spot2 has no lab1 trust — relay small files via the Mac: `ssh lab1 'cat f' | ssh spot2 'cat > f'`, verify md5). Eviction/rebuild routine: provision.sh + setup.sh SKIP_ENWIK9=1 + copy slices from lab1.
+
+**Gotchas (cost real time):** (1) Public-IP quota is 3 and deleting a VM does NOT delete its public IP — `az network public-ip list -g hutter-lab` and delete orphans, else `az vm create` fails with the masked "content already consumed" CLI error (rerun with `--debug` to see the real ARM preflight error). (2) Spot quota is 3 low-priority vCPUs total → spot boxes must be 2-core (E2s_v3 works; 16GB fits the ~8GB tip RSS).
 
 ## Azure
 - Subscription: **Azure for Students** (`eb6d20b6-8925-47bd-9ebc-06307613893b`), tenant Tufts, user slupo01@tufts.edu.

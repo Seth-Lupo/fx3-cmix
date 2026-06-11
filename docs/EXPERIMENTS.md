@@ -68,6 +68,8 @@ Every experiment gets a row here — **including null and negative results**. De
 
 **Scaling readout:** the port's relative gain is stable across tiers (−1.45% @1MB, −1.32% @10MB). If −1.3% holds at T3, model-side alone ≈ −1.45M on fx2's 110.35M S2 — comfortably past the 50,431 B shortfall even before the article-order −147,767. Peak RSS 7.89 GB at T1 with PPM arena at 1750MB-RAM; full-scale RAM remains the open compliance question (projection ≈9.6 GiB).
 
+**Probe queue launched 2026-06-11 on spot2** (T0 sanity + T1 signal each, vs next-fx3 tip T1 = 1,051,498): exp/031 mxA2[3] 0x10000→0x8000 (−35 MiB), exp/032 cmC2[4] 16→8×4096×4096 (−256 MiB), exp/033 cmC2[5] same (−256 MiB), exp/034 cmcr2 halved (−64 MiB, sensitivity test for full disable), exp/035 PPM order 26 retest atop tip (−61 @T0 pre-port). Purpose: price each RAM trim in bytes for the strict-10GB decision; o26 is the one cheap upside knob the port reshuffled. Note: dcsm 28→27 (−256 MiB) is ALREADY in the port (exp 030 shipped 27 bits vs v26's 28). Expectation per exp/008 precedent: memory trims ≈ invisible at T0; T1 is the signal tier; final pricing needs T2.
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### ✅ M2 SOLVED (2026-06-11 00:40) — fx3 nondeterminism root cause
