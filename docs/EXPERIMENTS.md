@@ -48,7 +48,10 @@ Every experiment gets a row here — **including null and negative results**. De
 | 013 | 2026-06-11 | exp/013-knobs-345 | T0 | text_1M | 71,334 | −11, faster (5m07s) | 5m07s | 5.75 GB | ✅ adopt+merged | v26 steps 3-5; WUS cap is a real speed lever |
 | 014 | 2026-06-11 | exp/014-pronoun | T0 | text_1M | 71,332 | −2 vs parent | 5m16s | 5.75 GB | ✅ adopt+merged | Pronoun word type (step 8); value unlocks at steps 16/23 |
 
-**next-fx3 cumulative @T0: 71,332 (−13 vs fx2). Steps merged: PPM-RAM, match×2, SSE blend, −SparseMatch, −4SSCM, st2/WUS/APM knobs, Pronoun.**
+| 015 | 2026-06-11 | exp/015-skipm1 | T0 | text_1M | 71,338 | +6 (noise) | 5m21s | 5.74 GB | ✅ adopt+merged | skipM1 gates (step 9); value = speed at scale (+11K author) |
+| 016 | 2026-06-11 | exp/016-codeword | T0 | text_1M | 71,332 | ±0 | 5m24s | 5.74 GB | ✅ adopt+merged, **decode RT OK** | codeword machinery (step 10) — gate open for sentence contexts |
+
+**next-fx3 cumulative @T0: 71,332-71,338 (−7..−13 vs fx2). Steps merged: PPM-RAM, match×2, SSE blend, −SparseMatch, −4SSCM, st2/WUS/APM knobs, Pronoun, skipM1, codeword machinery.**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
