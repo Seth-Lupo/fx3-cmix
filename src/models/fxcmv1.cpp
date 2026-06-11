@@ -3836,7 +3836,7 @@ void PredictorInit() {
         cmcr[i+1].Init(  2048*4096, 3, c_s[13],c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
 
     for (int i=0;i<4;i++)
-    cmcr2[i].Init( 1*4096*4096, 3, c_s[13],c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
+    cmcr2[i].Init( 4096*4096/2, 3, c_s[13],c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18; RAM trim probe exp034: halve (-64MiB), full disable is the fallback option
 
     cmC[1].Init(     64*2*4096, 3, c_s[14],c_s3[14],&STA5[0][0],c_s4[14],0xf0,0,&st2_p0[0]);
     cmC[2].Init(        2*4096, 2, c_s[15],c_s3[15],&STA2[0][0],c_s4[15],0xf0,0,&st2_p0[0]);
