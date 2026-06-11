@@ -54,9 +54,22 @@ self-extracting archive = cmix binary + compressed dict + compressed order + hea
 
 **Tunable surface spotted** (Phase 2B candidates): 23 mixer learning rates, deltas (200/400/0.5), match limit/size, PPM order & arena size, LSTM hyperparams, auxiliary discretization (×15), SSE params, UPDATE_LIMIT/SEED defines.
 
+## fxcmv1.cpp internal structure (line map, 2026-06-10)
+A self-contained paq8-style engine inside one file:
+- **~89–360**: squash/stretch LUTs, `Inputs` (64-aligned), ilog, **runtime state-table generation** (`num_states/discount/next_state/generate`, seeded by `Init(s0..s6)` — the state-table search space for experiments).
+- **~350–510**: dictionary load + codeword decode (`loaddict/decodeCodeWord/dosym/decodeWord`) — the online reverse-dictionary transform.
+- **~512–565**: SIMD mixer kernels `dot_product`/`train` (AVX2 `_mm256_madd_epi16`) — hot loops.
+- **~565–1540**: mixer plumbing + **three ContextMap variants** (Init at 921 / 1126 / 1359 = the 32 / 64 / 128-byte-per-context flavors), RunContextMap, StateMaps (`mix1/mix3/mix4/mix`).
+- **~1542–1800**: APM, DirectStateMap, MTFList, **SparseMatchModel** (gap 1–2, minlen 3–6, for escaped UTF-8).
+- **~1802–2200**: tiny vec, BracketContext, ColumnContext (tables/cells), WordsContext (the 4 word streams).
+- **~2221–2600+**: `Word` + `EnglishStemmer` (word types incl. Article/Conjunction/Adposition/ConjunctiveAdverb driving stream filtering).
+- Remainder: context wiring, main `mix()` per-bit pipeline, Perceive/Predict glue to cmix.
+
 ## TODO (Phase 1 deep-dive)
 - [x] Map the top-level predictor graph (above).
+- [x] Structural line-map of fxcmv1.cpp (above).
 - [ ] Count the 461 inputs exactly per member (fxcm NumOutputs dominates — verify).
+- [ ] Extract all ContextMap memory sizes (rebalancing axis) and context definitions in fxcm's wiring section.
 - [ ] Trace fxcmv1.cpp: word-stream state machine, ContextMap internals, mixer wiring.
 - [ ] Document the transform format byte-for-byte (escape codes, article framing).
 - [ ] Profile: where do the ~228k seconds actually go? (fxcm vs PPM vs LSTM vs mixers)
