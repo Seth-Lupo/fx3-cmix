@@ -113,10 +113,27 @@ short *model_predictions1, *model_predictions1_ptr;
 int num_models_padded = 0;
 extern short strt[4096];
 
+// exp038: kaitz exported ~487 of ~610 predictions to cmix and found "one good predictor in
+// fxcm can make compression worse in cmix, and a lot". The 7 APM-chain scalars below the
+// mixer stack are update-level internals, not model predictions — with FXCM_EXPORT_PRUNE=1
+// they still feed fxcm's internal fp-mixers but export neutral 0.5 (logit 0) to cmix.
+#ifndef FXCM_EXPORT_PRUNE
+#define FXCM_EXPORT_PRUNE 0
+#endif
+void AddPrediction(int x);
+void AddPredictionScalar(int x);
 void AddPrediction(int x) {
     assert(prediction_index >= 0 && prediction_index < num_models);
     model_predictions1[prediction_index] = strt[x]; // v26 step24: stretched mirror (Inputs::add overwrites with the exact input below)
     model_predictions[prediction_index++] = x * conversion_factor;
+}
+void AddPredictionScalar(int x) {
+#if FXCM_EXPORT_PRUNE
+    model_predictions1[prediction_index] = strt[x]; // internal fp-mixer input unchanged
+    model_predictions[prediction_index++] = 0.5f;   // neutral export to cmix
+#else
+    AddPrediction(x);
+#endif
 }
 
 void ResetPredictions() {
@@ -5717,7 +5734,7 @@ void update1() {
     if (pr>=848) ++failz;
 
     pr=modelPrediction(x.c0,x.bpos,x.c4);
-    AddPrediction(pr);
+    AddPredictionScalar(pr);
 
     int pt, pu=(apmA0.p(pr, x.c0, 3,x.y)+7*pr+4)>>3, pv, pz=failcount+1;
 
@@ -5728,22 +5745,22 @@ void update1() {
     pz=pz/2;
 
     pu=apmA3.p(pu,   ((x.c0*2)^AH1)&0x3ffff, rate,x.y);
-    AddPrediction(pu);
+    AddPredictionScalar(pu);
     pv=apmA1.p(pr,   ((x.c0*8)^hash(29,failz&2047))&0xffff, rate+1,x.y);
-    AddPrediction(pv);
+    AddPredictionScalar(pv);
     // If fails use stream2b else non-repeating stream2b
     if (fails&255)
         pv=apmA4.p(pv, hash(x.c0,stream2b & 0xfffc,(stream3bR & 0x1ff))&0x1ffff, rate,x.y);
     else
         pv=apmA4.p(pv, hash(x.c0,(stream2bR & 0xfffc)+0x10000,(stream3bR & 0x1ff))&0x1ffff, rate,x.y);
-    AddPrediction(pv);
+    AddPredictionScalar(pv);
     pt=apmA2.p(pr, ( (x.c0*32)^AH2)&0xffff, rate,x.y);
-    AddPrediction(pt);
+    AddPredictionScalar(pt);
     pz=apmA5.p(pu,   ((x.c0*4)^hash(min(9,pz),x5&0x80ff))&0x1ffff, rate,x.y);
-    AddPrediction(pz);
+    AddPredictionScalar(pz);
     if (fails&255) pr=(pt*6+pu  +pv*11+pz*14 +31)>>5;
     else           pr=(pt*4+pu*7+pv*12+pz*9 +31)>>5;
-    AddPrediction(pr);
+    AddPredictionScalar(pr);
     //l 4
     // v26 step24: integer fp-mixer bank + mmmO final chain. Kept INSIDE fxcm exactly as the
     // standalone does it (integer-deterministic); do NOT route these through cmix's
