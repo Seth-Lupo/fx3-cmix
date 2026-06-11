@@ -56,7 +56,10 @@ Every experiment gets a row here — **including null and negative results**. De
 
 | 023 | 2026-06-11 | exp/023-sentences stack (14+15+16+17) | T0 | text_1M | **70,936** | **−304 vs parent, first >300B win** | 5m28s | 6.40 GB | ✅ adopt+merged, **decode RT OK** | SentenceContext + StationaryMaps + wt-hashes + numbers; num models 509 |
 
-**next-fx3 cumulative @T0: 70,936 (−409 vs fx2 71,345). Steps 1-17 of 25 merged — incl. the ~108K SentenceContext headline feature. Remaining: 18-25 (XML model, cmC2 wave, sizes, per-article resets, mixer banks, dcsm-last). RSS@T0 now 6.4GB — RAM re-budget needed before T3.**
+| 020 | 2026-06-11 | exp/020-numbers (attribution) | T0 | text_1M | 71,140 | −100 vs parent | 4m16s | 5.75 GB | ✅ (within 023 stack) | numbers step alone |
+| 028 | 2026-06-11 | exp/028-resets stack (18+19+20+21+22) | T0 | text_1M | **70,467** | **−469 vs parent** | 4m49s | 7.34 GB | ✅ adopt+merged, **decode RT OK** | cmcr wave+nestList, XML model, ContextMap3/4 class swap w/ FIXED resets, sizes, per-article resets; num models 539; faster |
+
+**next-fx3 cumulative @T0: 70,467 (−878 vs fx2 71,345). Steps 1-22 of 25 merged, all decode-RT gates green. Remaining: 23/24 mixer banks, 25 dcsm (last, flagged). RAM projection ≈9.0 GiB pipeline (1 GiB headroom; trims identified).**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
