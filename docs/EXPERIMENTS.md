@@ -64,6 +64,10 @@ Every experiment gets a row here — **including null and negative results**. De
 
 **🏁 PORT COMPLETE: next-fx3 @T0 = 70,311 (−1,034 B = −1.45% vs fx2 71,345). All 25 map steps merged, every decode-RT gate green, the historic nondeterminism bug class fixed in 3 places. RAM ≈9.6 GiB projected (trims identified; FXCM_DCSM=0 kill-switch available). Next: T1/T2 scaling, RAM measurement, order+model combined T3.**
 
+| next25-t1 | 2026-06-11 | next-fx3 (full 25-step tip) | T1 | text_10M | **1,051,498** | **−14,039 = −1.32% vs 1,065,537** | 56m48s | **7.89 GB** | ✅ **scaling confirmed** | exp1 single-tenant; T0 −1.45% → T1 −1.32%, gain holds at 10× scale; FXTRACE hygiene verified (integrated model clean, instrumentation only in standalone/) |
+
+**Scaling readout:** the port's relative gain is stable across tiers (−1.45% @1MB, −1.32% @10MB). If −1.3% holds at T3, model-side alone ≈ −1.45M on fx2's 110.35M S2 — comfortably past the 50,431 B shortfall even before the article-order −147,767. Peak RSS 7.89 GB at T1 with PPM arena at 1750MB-RAM; full-scale RAM remains the open compliance question (projection ≈9.6 GiB).
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### ✅ M2 SOLVED (2026-06-11 00:40) — fx3 nondeterminism root cause
