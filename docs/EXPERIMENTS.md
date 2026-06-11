@@ -36,6 +36,11 @@ Every experiment gets a row here — **including null and negative results**. De
 | v26-b | 2026-06-11 | standalone v26 (fixed) | T1 | coded_10M | 1,646,440 | n/a | 20m53s | **6.77 GB** | ✅ measured | spot1 core1 (other core busy); RSS sets co-location budget |
 | v26-c | 2026-06-11 | standalone v26 (fixed) | T3 | coded_full (586 MB) | *running* | kaitz ladder predicts ≈113.6 M | est ~20 h c + ~20 h d | — | ⏳ | lab1 core3, /mnt/work/v26full; validates fix at scale + true v26 number on our build |
 
+| 008 | 2026-06-11 | exp/008-ppm1750-ram | T0 | text_1M | 71,345 | ±0, **md5-identical** | 5m23s | 5.72 GB | ✅ adopt (inert at T0) | PPM 14000MB-mmap→1750MB-RAM; arena unused at 1MB; frees 12.25GB; validate T2+ |
+| 009 | 2026-06-11 | exp/009-match2x | T0 | text_1M | 71,345 | ±0 size, content differs | 5m11s | 5.76 GB | ✅ adopt per author | match table ×2 (+32MB); active but size-neutral at T0 |
+| 010 | 2026-06-11 | exp/010-sse-blend | T0 | text_1M | 71,345 | ±0 size, content differs | 8m42s | 5.73 GB | ✅ adopt per author | SSE blend 4,5,12,11→4,7,12,9; size-neutral at T0 |
+| next-1 | 2026-06-11 | next-fx3 (008+009+010) | T1 | text_10M | *running* | vs 1,065,537 | — | — | ⏳ | combined port steps 1-3 at T1, spot1 |
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### ✅ M2 SOLVED (2026-06-11 00:40) — fx3 nondeterminism root cause
