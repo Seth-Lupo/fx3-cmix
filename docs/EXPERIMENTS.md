@@ -45,7 +45,10 @@ Every experiment gets a row here — **including null and negative results**. De
 | 011 | 2026-06-11 | exp/011-rm-sparsematch | T0 | text_1M | 71,332 | −13 | 7m57s | 5.72 GB | ✅ adopt+merged | SparseMatchModel removed; num_models 461→459; export plumbing OK |
 | 012 | 2026-06-11 | exp/012-rm-4sscm | T0 | text_1M | 71,352 | +7 | 8m02s | 5.72 GB | ⚠️ superseded | num_models edit no-op'd (branched off main); 4 dead exports — robustness datum |
 | 012b | 2026-06-11 | exp/012b-rm-4sscm | T0 | text_1M | 71,342 | −3, num_models 455 ✓ | 7m57s | 5.75 GB | ✅ adopt+merged | clean 4-SSCM removal atop next-fx3 |
-| 013 | 2026-06-11 | exp/013-knobs-345 | T0 | text_1M | *running* | — | — | — | ⏳ | v26 steps 3-5: st2_p1 13×+retire p2, WUS cap 319, APM A4/A5 halved (−16.5 MiB); relaunched after 2nd spot eviction |
+| 013 | 2026-06-11 | exp/013-knobs-345 | T0 | text_1M | 71,334 | −11, faster (5m07s) | 5m07s | 5.75 GB | ✅ adopt+merged | v26 steps 3-5; WUS cap is a real speed lever |
+| 014 | 2026-06-11 | exp/014-pronoun | T0 | text_1M | 71,332 | −2 vs parent | 5m16s | 5.75 GB | ✅ adopt+merged | Pronoun word type (step 8); value unlocks at steps 16/23 |
+
+**next-fx3 cumulative @T0: 71,332 (−13 vs fx2). Steps merged: PPM-RAM, match×2, SSE blend, −SparseMatch, −4SSCM, st2/WUS/APM knobs, Pronoun.**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
