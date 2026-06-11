@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4)
+int num_models = 439+1-2-7-2-4+5;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -3258,6 +3258,16 @@ bool skipM1=false; // v26 step9: long-match context skipping flag
 bool skipSeeExternal=false; // v26 step11: inside See also/References/Bibliography/External links section
 bool isCategory=false;      // v26 step11: inside [category:...] link
 bool isPageStarted=false;   // v26 step11: text tag seen since last page end
+U32 lastPTOP=-1,pageParag=0,pageSent=0; // v26 step12: short-page shift register + per-page counts (consumed by step 22's cmC[1] reset cadence)
+bool isLongTOP=false;       // v26 step12 (write-only in v26 too)
+enum PageState { // v26 step12
+    PNone     =0,
+    PTemplate =1,
+    PText     =2,
+    PTopic    =4,
+    PCategory =8,
+};
+U32 PState=0,PStateH=0; // v26 step12: page-structure state + its rolling hash
 U32 number0,number1,numlen0,numlen1,mybenum;
 // First char context index, bracket/first char context index (max value 7)
 U32 FcIdx=0,BrFcIdx;
@@ -3397,7 +3407,7 @@ void PredictorInit() {
     cmC1[0].Init(     32*4096,2|(c_r[9]<<8)|(c_s[9]<<16),c_s3[9],&STA6[0][0],c_s4[9],0x0,0,&st2_p0[0]);
     cmC1[1].Init(   2*32*4096,3|(c_r[10]<<8)|(c_s[10]<<16),c_s3[10],&STA7[0][0],c_s4[10],0,1,&st2_p1[0]);
     cmC1[2].Init(     32*4096,4|(c_r[11]<<8)|(c_s[11]<<16),c_s3[11],&STA2[0][0],c_s4[11],0,1,&st2_p1[0]);
-    cmC1[4].Init(     16*4096,5|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA7[0][0],c_s4[12],0,1,&st2_p1[0]);
+    cmC1[4].Init(     16*4096,6|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA7[0][0],c_s4[12],0,1,&st2_p1[0]); // v26 step12: +1 ctx (h+PStateH); v26 size 32*4096 deferred to step 21
     
     cmC[0].Init(      16*4096,7|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0,1,&st2_p1[0]);
     cmC[1].Init(   64*2*4096,3|(c_r[14]<<8)|(c_s[14]<<16),c_s3[14],&STA5[0][0],c_s4[14],0xf0,0,&st2_p0[0]);
@@ -3855,6 +3865,8 @@ int modelPrediction(int c0,int bpos,int c4){
         if ( c2==GREATERTHAN  && isText==true ) {
             isPageStarted=true; // v26 step11
             isText=false;
+            PState=PText; // v26 step12
+            PStateH=hash(PStateH,PState,0); // v26 step12
             if (c1==APOSTROPHE ||c1==FIRSTUPPER){
                 colcxt.Update(LF,0);
                 worcxt.Reset();
@@ -3864,6 +3876,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 nl=pos-2;
             }
         }
+        if ((x.c4&0xffffff)==(((EQUALS*256)+EQUALS)*256+EQUALS)) isLongTOP=true; // v26 step12
         // Column context update
         colcxt.Update(c1,c4&0xffffff);
         // Bracket context update
@@ -4083,7 +4096,14 @@ int modelPrediction(int c0,int bpos,int c4){
             if ((buffer1(5)==charSwap(LESSTHAN)) && (c1==GREATERTHAN  ) &&(buffer1(4)=='p'  )&& isPre==false && cwSTR==cwPRE) isPre=true,cwSTR=0x10000; // v26 step10
             else if ((buffer1(5)=='/') && (c1==GREATERTHAN) &&(buffer1(4)=='p'  )&& cwSTR==cwPRE) isPre=false,cwSTR=0x10000; // v26 step10
 
-            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) isPre=isMath=isNowiki=false,skipSeeExternal=isCategory=isPageStarted=false; // v26 step10+step11 (per-article CM resets deferred to step 22)
+            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) { // v26 step10+step11+step12 (per-article CM resets and the (lastPTOP&63)==63 cmC[1] reset deferred to step 22)
+                isPre=isMath=isNowiki=false;
+                skipSeeExternal=isCategory=isPageStarted=false;
+                PState=PStateH=0; // v26 step12
+                lastPTOP=lastPTOP*2; // v26 step12
+                if (pageParag<2 && pageSent<5) lastPTOP++; // v26 step12
+                pageParag=pageSent=0; // v26 step12
+            }
 
             // Update word0 pos
             wp[word0&0xffff]=pos;
@@ -4097,6 +4117,8 @@ int modelPrediction(int c0,int bpos,int c4){
                 spaces++;
             }
             else if (c1==LF) {
+                if (colcxt.lastfc(1)==FIRSTUPPER) pageParag++; // v26 step12
+                pageSent=pageSent+isParagraph; // v26 step12 (before isParagraph is zeroed below)
                 fc=isParagraph=firstWord=lastWT=0;
                 nl1=nl;
                 nl=pos-1;
@@ -4222,11 +4244,12 @@ int modelPrediction(int c0,int bpos,int c4){
         }
         if (colcxt.isNewLine()) {
             // Reset contexts when there are two empty lines
-            if ((colcxt.nlpos(0)+2-colcxt.nlpos(1))< 4){ 
+            if ((colcxt.nlpos(0)+2-colcxt.nlpos(1))< 4){
                 fccxt.Reset();
                 brcxt.Reset();
                 qocxt.Reset();
                 htcxt.Reset();
+                isLongTOP=false; // v26 step12
             }
             fc=colcxt.lastfc();
             // Reset first char context when there is >. For filtered wiki.
@@ -4236,6 +4259,14 @@ int modelPrediction(int c0,int bpos,int c4){
             else isParagraph=0;
             if (fc!=SQUAREOPEN) isCategory=false; // v26 step11
             fccxt.Update(fc);
+
+            if (fc==EQUALS) // v26 step12
+                PState=PTopic;
+            else if (isParagraph)
+                PState=PText;
+            else if (colcxt.isTemp)
+                PState=PTemplate;
+            PStateH=hash(PStateH,PState,0); // v26 step12
         }
 
         if (col>2 && c1>FIRSTUPPER && isMath==false){ 
@@ -4261,7 +4292,8 @@ int modelPrediction(int c0,int bpos,int c4){
         }
         // If we have wiki link [category:....] or [wikipedia:...] then remove that word.
         if (c1==COLON &&(cwCOLON==cwCATEGORY ||cwCOLON==cwUSER ||cwCOLON==cwWIKIPEDIA)) { // v26 step10/step11 (PState=PCategory/PStateH deferred to step 12, worcxt0.Remove to step 13)
-            if (cwCOLON==cwCATEGORY) isCategory=true; // v26 step11
+            if (cwCOLON==cwCATEGORY) PState=PCategory,isCategory=true; // v26 step11+step12
+            PStateH=hash(PStateH,PState,0); // v26 step12
             fccxt.Update(LF),worcxt.Remove();
         }
         // Probably math operator, ignore
@@ -4486,6 +4518,7 @@ int modelPrediction(int c0,int bpos,int c4){
         cmC1[4].set(c1+word0+number0*191 );
         cmC1[4].set(((c4 & 0xffff) << 16) | (fccontext  << 8) |fc);
         cmC1[4].set(((stream3bR & 0xfff)<< 8)+((stream2b & 0xfc)));
+        cmC1[4].set(h+PStateH); // v26 step12 (v26 cmC4[4] 6th slot)
 
         // Mostly table and column related contexts
         if (c1==ESCAPE) {
@@ -4497,7 +4530,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 // Word
                 cmC[0].set(worcxt.fword*3191+(stream2b & 3));
                 cmC[0].set(h+firstWord*89);
-                cmC[0].set(word0*53+c1+BrFcIdx);
+                cmC[0].set(word0*53+c1+BrFcIdx+PStateH); // v26 step12
             } else {
                 // Column
                 cmC[0].set(above | ((stream3b & 0x3f) << 9) | (colcxt.collen() << 19)| ((stream2b & 3) << 16) );
@@ -4508,7 +4541,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 // List
                 cmC[0].set(word0+( ( fccontext) << 8)  | ((BrFcIdx ) << 16));// or not add!
                 cmC[0].set(c1);
-                cmC[0].set(word0);
+                cmC[0].set(word0+PStateH); // v26 step12
             } else {
                 // Table
                 cmC[0].set(wrt_2b[bufr(colcxt.abovecellpos)]|( ( fccontext) << 8)  | ((BrFcIdx ) << 16));
