@@ -3279,6 +3279,7 @@ U32 t[14];
 int c1,c2,c3;
 U8 words,spaces,numbers;
 U32 word0,word00,wshift,x4,x5,isMatch,firstWord,linkword,senword; // v26 step13: word1..3 dropped (worcxt0 stream replaces them)
+U32 numberA=0; // v26 step14: rolling hash of the current digit run (number word)
 bool skipM1=false; // v26 step9: long-match context skipping flag
 bool skipSeeExternal=false; // v26 step11: inside See also/References/Bibliography/External links section
 bool isCategory=false;      // v26 step11: inside [category:...] link
@@ -3305,8 +3306,9 @@ int nl,nl1,col,fc;
 U32 t1[0x100];
 U32 t2[0x10000];
 int wp[0x10000];
+int np[0x10000]; // v26 step14: last position per numberA hash
 U16 ind3[0x2000000];
-U32 indirectBrByte=0,  indirectByte=0,indirectWord0Pos=0, indirectWord=0,u8w=0;
+U32 indirectBrByte=0,  indirectByte=0,indirectWord0Pos=0, indirectWord=0,u8w=0,indirectNumberd0Pos=0; // v26 step14: indirectNumberd0Pos
 U32 context1_ind3=0,cxtind3=0;
 U32 lastWT=0;
 // 3 bit stream 
@@ -3825,13 +3827,8 @@ void setbufstem(char c){
         } else  lastArt=false;
         U32 whash=(isMath?word0:(*pWord).Hash);
         lastWT=lastWT*16+getWT((*pWord).Type);
-        if ((*pWord).Type==Number && worcxt.Type(1)==Number){
-            U16 sb=worcxt.sBytes(1);
-            whash=whash+worcxt.Word(1);
-            worcxt.Remove();
-            worcxt.Set(sb>>8);
-        
-        }
+        // v26 step14: consecutive-Numbers merge removed; digit runs are now collected in
+        // numberA and pushed into worcxt/worcxt0 as one Number word when the run ends.
         if (isHTTAG) ; // v26 step13
         else if (worcxt.tpbyte==LESSTHAN && isHTTAG==false && qocxt.cxt==0) {
             isHTTAG=wasTag=true; // v26 step13
@@ -4037,12 +4034,16 @@ int modelPrediction(int c0,int bpos,int c4){
             } 
             // Parse numbers: (number), (number.number) or (number,number) 
             if ((c1>='0' && c1<='9') ) {
-                numbers=numbers+1;
-                if(numbers&4 && c2==',') number0=number1,number1=0,numlen0=numlen1,numlen1=0;
+                numbers=numbers+1;np[numberA&0xffff]=pos; // v26 step14
+                numberA=numberA*2104+j; // v26 step14 (comma-merge via numbers&4 removed in v26)
                 if (mybenum && numlen1<=2) number0=number1,number1=0,numlen0=numlen1,numlen1=0;
                 number0=number0*10+(c1&0x0f);
                 numlen0=min(19,numlen0+1);mybenum=0;
             } else {
+                if (numberA) { // v26 step14: push the digit run into the word streams as a Number word
+                    worcxt0.Update(numberA,c1,Number,numberA) ,worcxt.Update(numberA,c1,Number,numberA,0,(brcxt.cxt==SQUAREOPEN||c1==SQUARECLOSE )?1:0);
+                }
+                numberA=0; // v26 step14
                 if (numlen0 ||((numbers&0xf)==0)){
                     number1=number0,numlen1=numlen0,number0=numlen0=0;
                 }
@@ -4421,6 +4422,13 @@ int modelPrediction(int c0,int bpos,int c4){
         if (indirectWord0Pos>255)
             indirectWord0Pos=256 + (c1<<16);
         else indirectWord0Pos=indirectWord0Pos + (buf(indirectWord0Pos)<< 8)+(c1 << 16);
+        indirectNumberd0Pos=pos-np[numberA&0xffff]; // v26 step14
+        if (indirectNumberd0Pos>1024) {
+            indirectNumberd0Pos=0;
+        } else {
+            indirectNumberd0Pos=(0*256<<16)+(buf(indirectNumberd0Pos)<<8)+(c1<<16);
+        }
+        if (indirectNumberd0Pos && numberA)indirectWord0Pos=indirectNumberd0Pos; // v26 step14: number position overrides word position inside a number
         // Same as in cmix
         ind3[context1_ind3] = (cxtind3 * (1 << 5) + c1) & (0x2000000-1);
         context1_ind3 = (context1_ind3 * (1 << 5) + c1) & (0x2000000-1);
@@ -4439,7 +4447,7 @@ int modelPrediction(int c0,int bpos,int c4){
            }
         }
 
-        h=h+c1;
+        h=h+numberA+c1; // v26 step14
 
         // v26 step11: detect '== See also ==' / '== External links ==' / '== References ==' /
         // '== Bibliography ==' headings by codeword and [category: links by codeword.
