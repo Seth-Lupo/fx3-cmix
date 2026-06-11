@@ -5663,6 +5663,20 @@ void update() {
             if (mtf && bitn == 8015) fprintf(mtf, "BIT %ld\n", bitn);
             if (g_mixtrace) fprintf(mtf, "ENDBIT %ld\n", bitn);
         }
+        {
+            // FXTRACE4: per-byte scalar dump of position-indirection machinery
+            static FILE* sf = (FILE*)-1;
+            if (sf == (FILE*)-1) {
+                const char* e = getenv("FXTRACE4");
+                sf = e ? fopen(e, "w") : NULL;
+                if (sf) setvbuf(sf, NULL, _IONBF, 0);
+            }
+            if (sf && x.bpos == 7 && bitn/8 >= 985 && bitn/8 <= 1010) {
+                fprintf(sf, "byte %ld pos=%d word0=%u wp=%u iw0p=%u numA=%u inum=%u iw=%u ib=%u s3bR=%u\n",
+                    bitn/8, pos, word0, wp[word0&0xffff], indirectWord0Pos,
+                    numberA, indirectNumberd0Pos, indirectWord, indirectByte, stream3bR);
+            }
+        }
         bitn++;
     }
 }
