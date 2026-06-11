@@ -3783,7 +3783,7 @@ void PredictorInit() {
     mxA2[0].Init(  0x100,  30,  1, 14); // v26 step24: ctx c1
     mxA2[1].Init(  0x100,  30,  1, 14); // v26 step24: ctx c2
     mxA2[2].Init( 0x8000,  30,  1, 14); // v26 step24: ctx stream5b&0x7fff
-    mxA2[3].Init(0x10000,  30,  1, 14); // v26 step24: ctx stream2b&0xffff
+    mxA2[3].Init( 0x8000,  30,  1, 14); // v26 step24: ctx stream2b&0xffff; RAM trim probe exp031 (-35MiB)
 
     apmA0.Init();
     apmA1.Init();
