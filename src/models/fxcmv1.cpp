@@ -5805,10 +5805,23 @@ inline Predictor::Predictor()  {
     alloc1(mhashtable,0x200000*2+32,mhptr,32);
     // Generate state tables
     StateTable statetable;
-    statetable.Init(28, 28, 31, 29, 23, 4, 17,&STA1[0][0]);
-    statetable.Init(32, 28, 31, 28, 21, 5,  6,&STA2[0][0]);
-    statetable.Init(31, 27, 30, 27, 24, 4, 27,&STA4[0][0]);
-    statetable.Init(33, 31, 31, 24, 20, 4, 33,&STA5[0][0]);
+    // exp037b: remaining tables' mdc sweepable too (defaults = v26 values)
+#ifndef FXCM_STA1_MDC
+#define FXCM_STA1_MDC 17
+#endif
+#ifndef FXCM_STA2_MDC
+#define FXCM_STA2_MDC 6
+#endif
+#ifndef FXCM_STA4_MDC
+#define FXCM_STA4_MDC 27
+#endif
+#ifndef FXCM_STA5_MDC
+#define FXCM_STA5_MDC 33
+#endif
+    statetable.Init(28, 28, 31, 29, 23, 4, FXCM_STA1_MDC,&STA1[0][0]);
+    statetable.Init(32, 28, 31, 28, 21, 5, FXCM_STA2_MDC,&STA2[0][0]);
+    statetable.Init(31, 27, 30, 27, 24, 4, FXCM_STA4_MDC,&STA4[0][0]);
+    statetable.Init(33, 31, 31, 24, 20, 4, FXCM_STA5_MDC,&STA5[0][0]);
     // exp037: STA6/STA7 generator params sweepable via defines (defaults = v26 values).
     // Author data: state-table identity is the most size-sensitive knob (paq8 table swap
     // cost -319,523); these params were never swept post-v26.
