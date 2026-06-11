@@ -1387,6 +1387,11 @@ struct ContextMap4 {
                     }
                     s = *cp[i];
                 }
+                {
+                    extern FILE* g_mixtrace;
+                    if (g_mixtrace) fprintf(g_mixtrace, "M i=%d cxt=%08x cp0=%ld cbs=%d s=%d\n",
+                        i, cxt[i], cp0[i] ? (long)(cp0[i]-(U8*)t) : -1, x.cmBitState, s);
+                }
                 // predict from bit context
                 result=result+mix3(s);
                 
