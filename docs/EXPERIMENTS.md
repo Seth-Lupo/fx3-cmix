@@ -59,7 +59,10 @@ Every experiment gets a row here — **including null and negative results**. De
 | 020 | 2026-06-11 | exp/020-numbers (attribution) | T0 | text_1M | 71,140 | −100 vs parent | 4m16s | 5.75 GB | ✅ (within 023 stack) | numbers step alone |
 | 028 | 2026-06-11 | exp/028-resets stack (18+19+20+21+22) | T0 | text_1M | **70,467** | **−469 vs parent** | 4m49s | 7.34 GB | ✅ adopt+merged, **decode RT OK** | cmcr wave+nestList, XML model, ContextMap3/4 class swap w/ FIXED resets, sizes, per-article resets; num models 539; faster |
 
-**next-fx3 cumulative @T0: 70,467 (−878 vs fx2 71,345). Steps 1-22 of 25 merged, all decode-RT gates green. Remaining: 23/24 mixer banks, 25 dcsm (last, flagged). RAM projection ≈9.0 GiB pipeline (1 GiB headroom; trims identified).**
+| 029 | 2026-06-11 | exp/029-mixerbank (23+24) | T0 | text_1M | 70,373 | −94 | 9m25s* | 7.59 GB | ✅ adopt+merged | 18 L0 mixers + integer mxA2/mmmO chain in-fxcm; num models 554 (*contended) |
+| 030 | 2026-06-11 | exp/030-dcsm (25, tip) | T0 | text_1M | **70,311** | −62 | 9m46s* | 7.98 GB | ✅ adopt+merged, **decode RT OK** | dcsm ×5 behind FXCM_DCSM; 3rd reset-bug instance pre-fixed; num models 559 |
+
+**🏁 PORT COMPLETE: next-fx3 @T0 = 70,311 (−1,034 B = −1.45% vs fx2 71,345). All 25 map steps merged, every decode-RT gate green, the historic nondeterminism bug class fixed in 3 places. RAM ≈9.6 GiB projected (trims identified; FXCM_DCSM=0 kill-switch available). Next: T1/T2 scaling, RAM measurement, order+model combined T3.**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
