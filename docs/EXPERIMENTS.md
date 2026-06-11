@@ -41,6 +41,9 @@ Every experiment gets a row here — **including null and negative results**. De
 | 010 | 2026-06-11 | exp/010-sse-blend | T0 | text_1M | 71,345 | ±0 size, content differs | 8m42s | 5.73 GB | ✅ adopt per author | SSE blend 4,5,12,11→4,7,12,9; size-neutral at T0 |
 | next-1 | 2026-06-11 | next-fx3 (008+009+010) | T1 | text_10M | 1,065,539 | **+2** | 1h01m | 6.03 GB | ✅ no regression | steps 1-3 neutral at T1 as expected (capacity gains need scale); PPM-in-RAM RSS fine |
 
+| 011 | 2026-06-11 | exp/011-rm-sparsematch | T0 | text_1M | 71,332 | −13 | 7m57s | 5.72 GB | ✅ adopt+merged | SparseMatchModel removed; num_models 461→459; export plumbing OK |
+| 012 | 2026-06-11 | exp/012-rm-4sscm | T0 | text_1M | *running* | — | — | — | ⏳ | drop scmA[1,2,4,6] per map step 7; expect num_models 455 |
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### ✅ M2 SOLVED (2026-06-11 00:40) — fx3 nondeterminism root cause
