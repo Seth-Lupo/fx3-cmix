@@ -40,6 +40,7 @@ cmix
 #include <mem.h>
 #else
 #include <string.h>
+#include <stdint.h>
 #endif
 #define NDEBUG  // remove for debugging (turns on Array bound checks)
 #include <assert.h>
