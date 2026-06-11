@@ -9,6 +9,7 @@ M1 Mac (ARM, darwin). **Cannot build or benchmark x86-64 submission binaries.** 
 | lab1 | 20.29.69.113 | D4ds_v4 on-demand | core0: enwik9 baseline anchor (→~Jun13); core3: v26 standalone 586MB RT (/mnt/work/v26full); /mnt/work/proxy has all slices + full streams |
 | exp1 | 130.131.243.31 | E2s_v3 on-demand | experiment lane, SINGLE-TENANT for 25-step builds (~8GB RSS); auto-shutdown DISABLED 2026-06-11 for overnight T2 A/B (re-enable when done: `az vm auto-shutdown -g hutter-lab -n exp1 --time 0900`) |
 | spot2 | 20.29.114.158 | E2s_v3 spot | T0/T1 probe lane (eviction-tolerant queue at /mnt/work/probe_queue.sh, ledger-skip restart) |
+| spot3 | 20.80.25.248 | E2s_v3 spot, **northcentralus, RG hutter-ncus** | second-region probe lane (queue3 = STA1/2/4/5 sweep); region policy allows only centralus+northcentralus of the SKU-bearing regions; ncus on-demand quota (6 vCPU) reserved for T3 validation |
 
 spot1 deleted 2026-06-11 (3 evictions; user approved on-demand swap). SSH user `hutter`, key ~/.ssh/id_ed25519; lab1's pubkey is in exp1's authorized_keys for direct scp (spot2 has no lab1 trust — relay small files via the Mac: `ssh lab1 'cat f' | ssh spot2 'cat > f'`, verify md5). Eviction/rebuild routine: provision.sh + setup.sh SKIP_ENWIK9=1 + copy slices from lab1.
 
