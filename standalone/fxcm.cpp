@@ -2026,7 +2026,7 @@ struct WordsContext {
             else if (i==2) idx=idx*53;
             else if (i==1) idx=idx*83;
         }
-        if (num>=i) return vec_at(&stem,num-(i))*idx;
+        if (num>=i) return U32(vec_at(&stem,num-(i)))*U32(idx);  // unsigned: wraparound hash, was signed-overflow UB
         else return 0;
     }
 };
@@ -5162,7 +5162,7 @@ int modelPrediction() {
             else if (col==31) {
                 cmC2[12].set(c4<<16);
             } else {
-                cmC2[12].set(above | ((c4 &0xffff)<< 16)| (above1<< 8));
+                cmC2[12].set(above | ((U32(c4) &0xffff)<< 16)| (above1<< 8));  // unsigned shift, was UB
             }
         }
         // Word/centence. 
@@ -5232,7 +5232,7 @@ int modelPrediction() {
 
         cmC2[15].set((BrFcIdx*256)+fc+((stream3bR&0xFFF)<< 16));
 
-        U32 w4=(c4<<8)&0xff000000;
+        U32 w4=(U32(c4)<<8)&0xff000000;  // unsigned shift, was UB
         // 3 bit stream of mapped chars, all chars above 127 are mapped to a-z range.
         stream5b=(stream5b<<3) | (c1>127?wrt_3b['a']:wrt_3b[c1]);
         const U8 buf2=(c4>>8)&0xff;
