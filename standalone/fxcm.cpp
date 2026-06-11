@@ -5612,15 +5612,25 @@ void update() {
     mmmO[3].update(x.y),  pu=mmmO[3].pp(pu,mp3,mstate);
     
     pr=(squash(clp(pu))+pr*3)>>2;
-    // Debug instrumentation (inert unless FXTRACE is set): dump per-bit
+    // Debug instrumentation (inert unless FXTRACE/FXTRACE2 set): dump per-bit
     // predictions so encode/decode traces can be diffed to locate divergence.
     {
         static FILE* trf = (FILE*)-1;
+        static FILE* trf2 = (FILE*)-1;
+        static long bitn = 0;
         if (trf == (FILE*)-1) {
             const char* e = getenv("FXTRACE");
             trf = e ? fopen(e, "wb") : NULL;
+            e = getenv("FXTRACE2");
+            trf2 = e ? fopen(e, "wb") : NULL;
         }
         if (trf) { fputc(pr&255, trf); fputc((pr>>8)&255, trf); }
+        if (trf2 && bitn >= 7900 && bitn <= 8030) {
+            U32 hdr[2] = {(U32)bitn, prediction_index};
+            fwrite(hdr, 4, 2, trf2);
+            fwrite(model_predictions1, 2, prediction_index, trf2);
+        }
+        bitn++;
     }
 }
 
