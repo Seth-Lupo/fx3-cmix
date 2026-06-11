@@ -54,7 +54,9 @@ Every experiment gets a row here — **including null and negative results**. De
 | 017 | 2026-06-11 | exp/017-heading-skip | T0 | text_1M | 71,381 | +49 standalone | 8m40s | 5.73 GB | ✅ merged via stack | heading/category skip (step 11); costs info at 1MB, pays at full scale |
 | 019 | 2026-06-11 | exp/019-worcxt stack (11+12+13) | T0 | text_1M | **71,240** | **−92 vs parent** | 8m33s | 5.75 GB | ✅ adopt+merged, **decode RT OK** | PState contexts + worcxt rework; num_models 430 (fxcm) |
 
-**next-fx3 cumulative @T0: 71,240 (−105 vs fx2 71,345). Steps 1-13 of 25 merged. Next: steps 14-16, then 17 sentence contexts (largest author-measured win).**
+| 023 | 2026-06-11 | exp/023-sentences stack (14+15+16+17) | T0 | text_1M | **70,936** | **−304 vs parent, first >300B win** | 5m28s | 6.40 GB | ✅ adopt+merged, **decode RT OK** | SentenceContext + StationaryMaps + wt-hashes + numbers; num models 509 |
+
+**next-fx3 cumulative @T0: 70,936 (−409 vs fx2 71,345). Steps 1-17 of 25 merged — incl. the ~108K SentenceContext headline feature. Remaining: 18-25 (XML model, cmC2 wave, sizes, per-article resets, mixer banks, dcsm-last). RSS@T0 now 6.4GB — RAM re-budget needed before T3.**
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
