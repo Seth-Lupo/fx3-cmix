@@ -5635,11 +5635,15 @@ void update() {
             for (int k = 0; k < 9; k++) {
                 U32 h2[2] = {(U32)k, (U32)cmC4[k].cn};
                 fwrite(h2, 4, 2, trf2);
+                U32 cm = cmC4[k].cxtMask;
+                fwrite(&cm, 4, 1, trf2);
                 for (int i = 0; i < cmC4[k].cn; i++) {
                     U32 off = cmC4[k].cp0[i] ? (U32)(cmC4[k].cp0[i] - (U8*)cmC4[k].t) : 0xffffffff;
                     fwrite(&off, 4, 1, trf2);
                 }
             }
+            U32 flags[4] = {(U32)isCategory, (U32)skipSeeExternal, lastCW, (U32)x.blpos};
+            fwrite(flags, 4, 4, trf2);
         }
         bitn++;
     }
