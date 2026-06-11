@@ -5632,14 +5632,17 @@ void update() {
         if (trf2 && bitn >= 0 && bitn <= 8030) {
             U32 hdr[2] = {(U32)bitn, prediction_index};
             fwrite(hdr, 4, 2, trf2);
-            for (int k = 0; k < 9; k++) {
-                U32 h2[2] = {(U32)k, (U32)cmC4[k].cn};
+            for (int k = 0; k < 18; k++) {
+                ContextMap4& M = (k < 9) ? cmC4[k] : cmCR[k-9];
+                U32 h2[2] = {(U32)k, (U32)M.cn};
                 fwrite(h2, 4, 2, trf2);
-                U32 cm = cmC4[k].cxtMask;
+                U32 cm = M.cxtMask;
                 fwrite(&cm, 4, 1, trf2);
-                for (int i = 0; i < cmC4[k].cn; i++) {
-                    U32 off = cmC4[k].cp0[i] ? (U32)(cmC4[k].cp0[i] - (U8*)cmC4[k].t) : 0xffffffff;
+                for (int i = 0; i < M.cn; i++) {
+                    U32 off = M.cp0[i] ? (U32)(M.cp0[i] - (U8*)M.t) : 0xffffffff;
                     fwrite(&off, 4, 1, trf2);
+                    U8 st = M.cp[i] ? *M.cp[i] : 0xee;
+                    fwrite(&st, 1, 1, trf2);
                 }
             }
             U32 flags[4] = {(U32)isCategory, (U32)skipSeeExternal, lastCW, (U32)x.blpos};
