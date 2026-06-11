@@ -3180,6 +3180,7 @@ U32 t[14];
 int c1,c2,c3;
 U8 words,spaces,numbers;
 U32 word0,word00,word1,word2,word3,wshift,x4,x5,isMatch,firstWord,linkword,senword;
+bool skipM1=false; // v26 step9: long-match context skipping flag
 U32 number0,number1,numlen0,numlen1,mybenum;
 // First char context index, bracket/first char context index (max value 7)
 U32 FcIdx=0,BrFcIdx;
@@ -3754,6 +3755,14 @@ int modelPrediction(int c0,int bpos,int c4){
     U32 h,j;
 
     if (bpos== 0){
+        // v26 step9: skip mode based on a match length (uses previous-byte parser state, as in v26 parseByte)
+        skipM1=isMatch>61;
+        if (colcxt.isTemp || colcxt.nlChar==WIKITABLE) skipM1=isMatch>15;
+        if (colcxt.lastfc()==SQUAREOPEN || worcxt.wordcount>1) skipM1=isMatch>15;
+        if (colcxt.lastfc()=='*' ||colcxt.lastfc()=='#') skipM1=isMatch>15;
+        if (colcxt.lastfc()==EQUALS) skipM1=isMatch>5;
+        if (qocxt.context==APOSTROPHE) skipM1=isMatch>5;
+        if (isParagraph && worcxt.wordcount>3) skipM1=isMatch>13;
         c3=c2;
         c2=c1;
         c1=c4&0xff;
@@ -3811,7 +3820,7 @@ int modelPrediction(int c0,int bpos,int c4){
         for (i=13; i>0; --i)
             t[i]=t[i-1]*primes[i]+c1+i*256;
         // Skip when line starts with spaces and it is space char
-        if (fc==SPACE && c1==SPACE){
+        if ((fc==SPACE && c1==SPACE) || (skipM1)){ // v26 step9
             cmC2[0].sets(); cmC2[0].sets(); cmC2[0].sets(); 
         } else {
             for (i=3; i<6; ++i)
@@ -4299,7 +4308,8 @@ int modelPrediction(int c0,int bpos,int c4){
         if (c1==ESCAPE||col<2 ||utf8left ||fc==SPACE) {
             cmC2[5].sets(); 
         } else {
-            cmC2[5].set(h+ word2*71);
+            if (isMatch>61) cmC2[5].sets(); // v26 step9
+            else cmC2[5].set(h+ word2*71);
         }
         if (fc==SPACE || brcxt.cxt==LESSTHAN) {
                cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets();
@@ -4317,23 +4327,34 @@ int modelPrediction(int c0,int bpos,int c4){
         }
         // current word and word(1) type upto preffix(not included), paragraph word(1) 
         cmC1[6].set(h+(worcxt.Type(1)&(0x1FF))+worcxt1.Word(1)); 
-        cmC2[6].set(((stream2b&15)<<16)+(t[2]&0xffff));  // o2
+        if (isMatch>61) cmC2[6].sets(); else cmC2[6].set(((stream2b&15)<<16)+(t[2]&0xffff));  // o2 // v26 step9
 
         if (c1==ESCAPE || utf8left || fccontext==CURLYOPENING) 
             cmC2[7].set(0);
         else 
             cmC2[7].set(indirectBrByte);
 
-        cmC2[8].set( ((indirectBrByte>>0)&0x7ff)*32 + ((stream4b & 0xfff0) << 16)+BrFcIdx);
-        cmC2[8].set((stream3bR&0x3fffffff)*4+(stream2b&3));
-        cmC2[8].set((fccontext*4) + ((stream3bR & 0x3ffff) << 9 )+BrFcIdx);
+        if (skipM1) { // v26 step9
+            cmC2[8].sets();
+            cmC2[8].sets();
+            cmC2[8].sets();
+        } else {
+            cmC2[8].set( ((indirectBrByte>>0)&0x7ff)*32 + ((stream4b & 0xfff0) << 16)+BrFcIdx);
+            cmC2[8].set((stream3bR&0x3fffffff)*4+(stream2b&3));
+            cmC2[8].set((fccontext*4) + ((stream3bR & 0x3ffff) << 9 )+BrFcIdx);
+        }
         if (fccontext==HTLINK) 
             cmC2[8].sets();
         else
             cmC2[8].set((c4 & 0xffffff) + ((stream2b << 18) & 0xff000000));
         
-        cmC1[0].set(colcxt.lastfc(0) | (fccontext<< 15) | ((stream3b & 63) << 7)|(brcontext << 24) );
-        cmC1[0].set((colcxt.lastfc(0) | ((c4 & 0xffffff) << 8)));
+        if (skipM1) { // v26 step9 (v26 cmC4[0])
+            cmC1[0].sets();
+            cmC1[0].sets();
+        }else{
+            cmC1[0].set(colcxt.lastfc(0) | (fccontext<< 15) | ((stream3b & 63) << 7)|(brcontext << 24) );
+            cmC1[0].set((colcxt.lastfc(0) | ((c4 & 0xffffff) << 8)));
+        }
     
         cmC1[1].set( (stream2b & 3) +word00*11);
         cmC1[1].set(c4 & 0xffff);
@@ -4407,7 +4428,7 @@ int modelPrediction(int c0,int bpos,int c4){
         cmC2[9].set(fc|((stream2bR & 0xfff) << 9) | ((c1  ) << 24));//end is good (lang)
 
         cmC2[16].set( worcxt.fword*83+(stream2b & 15)*11+brcontext); // all category/language/image links (better as standalone)
-        cmC2[17].set( worcxt.Last(1,Verb)+worcxt.Word(1)*83+h);
+        if (skipM1) cmC2[17].sets(); else cmC2[17].set( worcxt.Last(1,Verb)+worcxt.Word(1)*83+h); // v26 step9 (v26 also ORs skipSeeExternal, step 11)
 
         cmC2[9].set((x4 & 0xffff00)+ brcontext+(fccontext<< 24));
         // Wikipedia has lot of links in form: [word word ...]. We collect context of whole link as singele word, no gaps.
@@ -4486,7 +4507,7 @@ int modelPrediction(int c0,int bpos,int c4){
         // Current word or number
         cmC[3].set( ((linkword?linkword:word0)*3301+number0*3191));
 
-        if (c1==ESCAPE|| utf8left || fccontext==CURLYOPENING || fccontext==HTLINK || fc==SPACE || fc==HTML || brcontext==LESSTHAN || col<2 || isMath || (worcxt.sBytes(0)>>8)=='\\') {
+        if (c1==ESCAPE|| skipM1 || utf8left || fccontext==CURLYOPENING || fccontext==HTLINK || fc==SPACE || fc==HTML || brcontext==LESSTHAN || col<2 || isMath || (worcxt.sBytes(0)>>8)=='\\') { // v26 step9 (v26 also has isCategory, step 11)
             // Disabled when: 
             // escaped utf8, template (onliner) or table beginning, 
             // html link, html (tag), fist char space,
