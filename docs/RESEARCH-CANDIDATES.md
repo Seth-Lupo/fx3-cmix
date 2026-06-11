@@ -184,3 +184,17 @@ the published trajectory has clearly flattened near 1%.
    definition and budget to 9.7 GB to be safe.
 5. Quantify overlap between candidate #2 (v26 port) and #8 (memory rebalance) — the predictor-gains
    doc predates v26 and some gains are likely already absorbed.
+
+---
+
+## 2026-06-12 research refresh (post-port, post-sweep synthesis)
+
+Field check (LTCB Jun 2026): no CPU-feasible movement since fx2. jax-compress (Knoll, Mar 2026) = TPU, ineligible. nncp v3.2 107.26M = transformer class, ~100× our time budget. **Our candidate's projected ~108.8M ≈ cmix v21's unconstrained 108.24M — the port has nearly exhausted the context-mixing class within prize limits.** Empirical confirmation from our sweeps: every parameter surface (STA generators, mixer sizes, LSTM lr, PPM order) is at a flat optimum.
+
+Ranked post-T3 margin levers (engaged only if first T3 lands in 0.95–1.0%):
+1. **CM memory rebalance @T2 tier** (candidate #8) — only author-measured 6-figure upside left; freed −547MiB from trims funds it. T2 datapoints (~10h each) on lab2-class box.
+2. **Modern-embedding article reorder** (candidate #10 upgraded) — ordering over-delivered 3 submissions running (+322K dict-era, +212K starlit-era, +147K v26); every existing order used doc2vec/t-SNE-class embeddings; 2026 sentence-transformers are categorically better. Mac-side prep free. Full-pipeline validation only (T3-expensive) → prep now, validate on demand.
+3. **Gating-context search** — GLN theory (Veness et al., arXiv:1910.01526; cmix is its flagship instance) says capacity is in gating context functions, not mixer params. fx's 24 gating contexts are hand-picked; search alternatives per-mixer at T1 (~1h/datapoint). The one architecture-level idea with theory behind it that kaitz never systematized.
+4. **Adaptive-LR mixer** (paq8px-proven, Pais) — cheap probe on fxcm final chain; modest expectation given kaitz's LR tuning history.
+
+Closed lines (do not reopen): STA generator params (full surface swept flat), export pruning (load-bearing, +1,199 @T1), order-file delta coding (real-cmix inverted the xz proxy, +8,882 — proxy-trap case study #2), all of §(b).
