@@ -39,7 +39,7 @@ Every experiment gets a row here — **including null and negative results**. De
 | 008 | 2026-06-11 | exp/008-ppm1750-ram | T0 | text_1M | 71,345 | ±0, **md5-identical** | 5m23s | 5.72 GB | ✅ adopt (inert at T0) | PPM 14000MB-mmap→1750MB-RAM; arena unused at 1MB; frees 12.25GB; validate T2+ |
 | 009 | 2026-06-11 | exp/009-match2x | T0 | text_1M | 71,345 | ±0 size, content differs | 5m11s | 5.76 GB | ✅ adopt per author | match table ×2 (+32MB); active but size-neutral at T0 |
 | 010 | 2026-06-11 | exp/010-sse-blend | T0 | text_1M | 71,345 | ±0 size, content differs | 8m42s | 5.73 GB | ✅ adopt per author | SSE blend 4,5,12,11→4,7,12,9; size-neutral at T0 |
-| next-1 | 2026-06-11 | next-fx3 (008+009+010) | T1 | text_10M | *running* | vs 1,065,537 | — | — | ⏳ | combined port steps 1-3 at T1, spot1 |
+| next-1 | 2026-06-11 | next-fx3 (008+009+010) | T1 | text_10M | 1,065,539 | **+2** | 1h01m | 6.03 GB | ✅ no regression | steps 1-3 neutral at T1 as expected (capacity gains need scale); PPM-in-RAM RSS fine |
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
