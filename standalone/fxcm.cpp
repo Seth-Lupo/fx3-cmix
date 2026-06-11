@@ -83,10 +83,13 @@ const int num_models = 560;// 16
 short *model_predictions1,*model_predictions1_ptr;
 unsigned int prediction_index=0;
 
-void AddPrediction(int x) {
+int prediction_lines[600];  // debug: __LINE__ of each AddPrediction call this bit
+void AddPredictionL(int x, int line) {
+    prediction_lines[prediction_index]=line;
     model_predictions1[prediction_index++]=x;
     assert(prediction_index >= 0 && prediction_index < num_models);
 }
+#define AddPrediction(x) AddPredictionL((x), __LINE__)
 
 void ResetPredictions() {
     assert(prediction_index >= 0 && prediction_index <= num_models);
@@ -5629,6 +5632,7 @@ void update() {
             U32 hdr[2] = {(U32)bitn, prediction_index};
             fwrite(hdr, 4, 2, trf2);
             fwrite(model_predictions1, 2, prediction_index, trf2);
+            fwrite(prediction_lines, 4, prediction_index, trf2);
         }
         bitn++;
     }
