@@ -4456,13 +4456,34 @@ int modelPrediction(int c0,int bpos,int c4){
             if ((buffer1(5)==charSwap(LESSTHAN)) && (c1==GREATERTHAN  ) &&(buffer1(4)=='p'  )&& isPre==false && cwSTR==cwPRE) isPre=true,cwSTR=0x10000; // v26 step10
             else if ((buffer1(5)=='/') && (c1==GREATERTHAN) &&(buffer1(4)=='p'  )&& cwSTR==cwPRE) isPre=false,cwSTR=0x10000; // v26 step10
 
-            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) { // v26 step10+step11+step12 (per-article CM resets and the (lastPTOP&63)==63 cmC[1] reset deferred to step 22)
-                isPre=isMath=isNowiki=false;
-                wt3cxt=0; // v26 step16 (page-end worcxt.Reset() lands in step 22)
-                skipSeeExternal=isCategory=isPageStarted=false;
+            // wikipedia article ended with page tag. Do reset on some contexts. // v26 step22
+            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) { // v26 step10+step11+step12+step22
+                isPre=isMath=isNowiki=false,colcxt.nlChar=LF; // v26 step22: +nlChar
+                colcxt.resetCells(); // v26 step22: parser-stack resets
+                fccxt.Reset();       // v26 step22
+                brcxt.Reset();       // v26 step22
+                qocxt.Reset();       // v26 step22
+                htcxt.Reset();       // v26 step22
+                worcxt.Reset();wt3cxt=0; // v26 step16+step22 (word streams; worcxt3 tag stream NOT reset, as in v26)
+                worcxt0.Reset();     // v26 step22
+                worcxt1.Reset();     // v26 step22
+                worcxt2.Reset();     // v26 step22
+                skipSeeExternal=isCategory=false;
+                isPageStarted=false;
                 PState=PStateH=0; // v26 step12
                 lastPTOP=lastPTOP*2; // v26 step12
                 if (pageParag<2 && pageSent<5) lastPTOP++; // v26 step12
+                // v26 step22: per-article CM resets (FIXED reset(): memset from aligned t,
+                // (tmask+1) buckets; StateMaps preserved). v26 reset order kept verbatim.
+                cmC4[1].reset();
+                cmC4[2].reset();
+
+                cmC4[4].reset();
+                cmC4[7].reset();
+                cmC4[8].reset();
+                cmC4[6].reset();
+                cmC[0].reset();
+                if ((lastPTOP&63)==63) cmC[1].reset(),lastPTOP++; // v26 step22: 64-short-page cadence
                 pageParag=pageSent=0; // v26 step12
             }
 
