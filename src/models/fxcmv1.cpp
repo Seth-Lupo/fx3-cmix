@@ -90,13 +90,25 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15+30+154+20-144;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC4[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19) -144 step20 class swap (CM3 4/3 + CM4 3/2 per slot incl. run, markers gone; +cmC4[8] 2 slots, +cmCR 3 slots)
+int num_models = 439+1-2-7-2-4+5+4+15+30+154+20-144+14+1;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC4[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19) -144 step20 class swap (CM3 4/3 + CM4 3/2 per slot incl. run, markers gone; +cmC4[8] 2 slots, +cmCR 3 slots) +14 step23 mixer outputs 10->24 (mxA[10..16] +7, mxA[18] lstmex keeper +1, mxA[17]+mxA1[0..4] +6) +1 step24 post-chain final pr => 524
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
 
+// v26 step24: stretched-short mirror of the export vector. In the standalone the prediction
+// vector IS this short array (clp'd stretched inputs) and the four integer mixers mxA2[0..3]
+// read it directly via setTxWx(num_models, model_predictions1). Here the float valarray stays
+// the cmix export; the mirror feeds the internal mxA2 bank only. 32B-aligned, padded to a
+// multiple of 16 for the AVX2 dot product (tail entries stay zero). prediction_index-- exclusion
+// sites (lstm inputs, dcsm pre1 later) drop out of the mirror the same way they drop out of the
+// export (the next add overwrites the slot).
+short *model_predictions1, *model_predictions1_ptr;
+int num_models_padded = 0;
+extern short strt[4096];
+
 void AddPrediction(int x) {
     assert(prediction_index >= 0 && prediction_index < num_models);
+    model_predictions1[prediction_index] = strt[x]; // v26 step24: stretched mirror (Inputs::add overwrites with the exact input below)
     model_predictions[prediction_index++] = x * conversion_factor;
 }
 
@@ -193,6 +205,7 @@ struct alignas(64) Inputs{
             assert(p>-2048 && p<2048);
             n[ncount++]=p;
             AddPrediction(squash(p));
+            model_predictions1[prediction_index-1]=(short)(p<-2047?-2047:(p>2047?2047:p)); // v26 step24: exact clp(p) mirror (avoids stretch(squash(p)) quantization)
         }
     };
 template <const int S >
@@ -207,7 +220,8 @@ struct BlockData {
     int cmBitState; // v26 step20: precomputed getStateByteLocation(bpos,c0)
     
     Inputs<S> mxInputs1; // array of inputs, for two layers
-    Inputs<32> mxInputs2;
+    Inputs<64> mxInputs2; // v26 step23: L1 input vector (ncount fixed at 32; 19 live)
+    Inputs<64> mxInputs4; // v26 step23: L2 input vector (ncount fixed at 16; 6 live)
     void Init(){
         y=0 ,c0=1, c4=0,bpos=0,blpos=0,bposshift=0,c0shift_bpos=0,cmBitState=0; // v26 step20: +cmBitState
     }
@@ -521,6 +535,38 @@ void decodeWord(int c){
 // w[i] += ((t[i]*2*err)+(1<<16))>>17 bounded to +- 32K.
 // n is rounded up to a multiple of 8.
 
+// v26 step24: 2-input integer logistic mixer (24-bit weights, low-2-bit error-count warmup).
+// Used by the mmmO final chain (and by DirectStateMap in step 25). All-integer — this chain
+// stays inside fxcm; it is NOT routed through cmix's floating-point mixers.
+struct Mix {
+    int N;  // n
+    int* wt;  // weights, scaled 24 bits
+    int x1, x2;    // inputs, scaled 8 bits (-2047 to 2047)
+    int cxt;  // last context (0..n-1)
+    int pr;   // last output
+
+    void Init(int n=256) {
+       N=n, x1=0, x2=0, cxt=0, pr=0;
+       alloc(wt, n*2);
+       for (int i=0; i<N*2; ++i)
+            wt[i]=1<<23;
+    }
+    int pp(int p1, int p2, int cx) {
+        assert(cx>=0 && cx<N);
+        cxt=cx*2;
+        return pr=((x1=p1)*(wt[cxt]>>16)+(x2=p2)*(wt[cxt+1]>>16)+128)>>8;
+    }
+    void update(int y) {
+        assert(y==0 || y==1);
+        int err=((y<<12)-squash(pr));
+        if ((wt[cxt]&3)<3)
+            err*=4-(++wt[cxt]&3);
+        err=(err+8)>>4;
+        wt[cxt]+=x1*err&-4;
+        wt[cxt+1]+=x2*err;
+  }
+};
+
 struct Mixer1 { 
   int N, M;   // max inputs, max contexts, max context sets
   short *tx;  // N inputs from add()  
@@ -627,6 +673,9 @@ void train(short *t, short *w, int n, int err) {
     tx=mn; 
     // Set bias
     for (int j=0; j<M*N; ++j) wx[j]=129;
+  }
+  void reset() { // v26 step23: dead in v26 too (never called); kept for diffability
+    for (int j=0; j<M*N; ++j) wx[j]=wx[j]*2;
   }
   void Init(int m,  U32 s,U32 e,U32 ue){
     M=m,  cxt=0, shift1=s,elim=e,uperr=ue;err=0;
@@ -3570,7 +3619,10 @@ int pr; // Our most important variable - final prediction
 
 StateMap1 smA[3];
 SmallStationaryContextMap scmA[7];   // 1x7 inputs fp
-Mixer1 mxA[12]; 
+Mixer1 mxA[19]; // v26 step23: [0..17] = v26 L0 bank (mxA[16] xmlS-gated, mxA[17] feeds mxInputs4); [18] = integration extra keeping fx2's lstmex mixer (not in v26)
+Mixer1 mxA1[6]; // v26 step23: L1 bank [0..4] (read mxInputs2) + L2 final [5] (reads mxInputs4)
+Mixer1 mxA2[4]; // v26 step24: integer fp-stage mixers over the whole stretched prediction vector
+Mix mmmO[4];    // v26 step24: final integer chain, keyed on mstate
 // Predictors are:
 // medium state memory, per context max 7 uniqe contexts state sets
 // for average sized contexts
@@ -3626,6 +3678,8 @@ void PredictorInit() {
     smA[1].Init(1<<19,1023);
     smA[2].Init(1<<16,1023);
 
+    for (int i=0;i<4;i++) mmmO[i].Init(256); // v26 step24
+
     scmA[0].Init(8); 
     //scmA[1].Init(8);   // v26 port: SSCM removed
     //scmA[2].Init(8);   // v26 port: SSCM removed
@@ -3637,19 +3691,38 @@ void PredictorInit() {
     maps1.Init(16,8); // v26 step15
     maps2.Init(16,8); // v26 step15
 
-    // Mixers      size,  shift, err, errmul 
-    mxA[0].Init(    2048, 237,  8, 69); // general
-    mxA[1].Init(   6*256, 204,  8, 19); // ...
-    mxA[2].Init( 6*256*4,  70,  1, 34);
-    mxA[3].Init(   8*256,  54,  1, 23);
-    mxA[4].Init(   6*256,  55,  1, 24);
-    mxA[5].Init( 7*256*4,  55,  1, 24);
-    mxA[6].Init(  0x4000,  70,  1, 34);
+    // Mixers      size,  shift, err, errmul   // v26 step23: params from the v26 Init table verbatim
+    mxA[0].Init(  0x8000,  75,  8, 14); // general (M 2048->0x8000, ctx widened to 12-bit streams)
+    mxA[1].Init(   6*256,  75,  8, 14);
+    mxA[2].Init(   6*256,  30,  1, 38); // M 6144->1536, ctx narrowed
+    mxA[3].Init(   8*256,  31,  1, 34);
+    mxA[4].Init(   6*256,  53,  1, 23);
+    mxA[5].Init(  32*256,  79,  1, 24); // M 7168->8192
+    mxA[6].Init(  0x4000,  75,  1, 20);
     mxA[7].Init(  0x4000,  55,  1, 24);
-    mxA[8].Init( 0x20000,  55,  1, 24);
-    mxA[9].Init( 0x20000,  55,  1, 24);
-    mxA[10].Init(8*7*2*2,   6,  0,  4); // final mixer
-    mxA[11].Init(      1,   6,  0,  4); // helper for final
+    mxA[8].Init( 0x20000,  55,  1, 24); // deccode
+    mxA[9].Init( 0x20000,  55,  1, 24); // v26 ctx: stream3bR/FcIdx/isParagraph/lastWT (lstmex moved to mxA[18])
+    mxA[10].Init(0x10000,  55,  1, 24); // v26 step23 new: c4&0xffff
+    mxA[11].Init( 0x4000,  55,  1, 24); // v26 step23 new: stream3b+c0
+    mxA[12].Init( 32*256,   6,  1,  4); // v26 step23 new: oldwt1+stream2bR (step16 deferred consumer)
+    mxA[13].Init( 32*256,   6,  1,  4); // v26 step23 new: stream3bR&511
+    mxA[14].Init( 32*256,  55,  1, 24); // v26 step23 new: BrFcIdx/FcIdx/wrt_3b[c0b]
+    mxA[15].Init( 16*256,  55,  1, 24); // v26 step23 new: (numbers|words)+stream2bR
+    mxA[16].Init(   1024,   6,  1,  4); // v26 step23 new: xmlS (isXML-gated; step19 deferred consumer)
+    mxA[17].Init(   2048,   6,  1,  4); // v26 step23 new: PState+stream2b -> mxInputs4
+    mxA[18].Init(    8192,  55,  1, 24); // integration extra (not in v26): fx2 lstmex mixer kept; old mxA[9] ctx, M trimmed 0x20000->8192 (= used range bpos*1024+fails*256+lstmex)
+
+    mxA1[0].Init( 8*7*4,   6,  0,  4); // v26 step23: L1 (old final mxA[10], same ctx formula)
+    mxA1[1].Init(     1,   6,  0,  4); // v26 step23: L1 helper (old mxA[11])
+    mxA1[2].Init(  2048,   6,  1,  4); // v26 step23: L1 new, stream2b&0x3f
+    mxA1[3].Init(  2048,   6,  1,  4); // v26 step23: L1 new, stream2b/wrt_2b[c0b]
+    mxA1[4].Init(  2048,   6,  1,  4); // v26 step23: L1 new, ordX/wrt_2b[c0b]
+    mxA1[5].Init(  2048,   6,  1,  4); // v26 step23: L2 final (ctx 0, reads mxInputs4)
+
+    mxA2[0].Init(  0x100,  30,  1, 14); // v26 step24: ctx c1
+    mxA2[1].Init(  0x100,  30,  1, 14); // v26 step24: ctx c2
+    mxA2[2].Init( 0x8000,  30,  1, 14); // v26 step24: ctx stream5b&0x7fff
+    mxA2[3].Init(0x10000,  30,  1, 14); // v26 step24: ctx stream2b&0xffff
 
     apmA0.Init();
     apmA1.Init();
@@ -3659,16 +3732,24 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(474+19+3)&-16; // v26 step20: 474 CM adds (CM3 4/3, CM4 3/2 per slot) + 19 non-CM adds (match 7, scm 6, maps 4, rcm 1, lstm 1) -> N=496 (S=800 headroom kept for step 23)
-    x.mxInputs2.ncount=(8+15)&-16;
+    x.mxInputs1.ncount=(474+19+15)&-16; // v26 step20/23: 474 CM adds + 19 non-CM adds (match 7, scm 6, maps 4, rcm 1, lstm 1) -> N=496; step23/24 outputs go to mxInputs2/mxInputs4, not here (S=800 headroom kept for step 25)
+    x.mxInputs2.ncount=32; // v26 step23: fixed L1 dot width (19 live: mxA[0..16] + mxA[18] + lstm/2; tail stays zero)
+    x.mxInputs4.ncount=16; // v26 step23: fixed L2 dot width (6 live: mxA[17] + mxA1[0..4]; tail stays zero)
 
     // Provide inputs array info to mixers
-    for (int i=0;i<10;i++)
+    for (int i=0;i<19;i++) // v26 step23: 18 v26 L0 mixers + mxA[18] lstmex extra
          mxA[i].setTxWx(x.mxInputs1.ncount,&x.mxInputs1.n[0]);
 
-    // Final mixer
-    mxA[10].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
-    mxA[11].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
+    // L1 bank
+    for (int i=0;i<5;i++) // v26 step23
+        mxA1[i].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
+    // L2 final
+    mxA1[5].setTxWx(x.mxInputs4.ncount,&x.mxInputs4.n[0]);
+    // v26 step24: integer fp-stage bank reads the whole stretched prediction vector
+    num_models_padded=(num_models+15)&-16;
+    alloc1(model_predictions1,num_models_padded+32,model_predictions1_ptr,32);
+    for (int i=0;i<4;i++)
+        mxA2[i].setTxWx(num_models_padded,model_predictions1);
 
 //                mem           c  prmul   smul        sta      s4   keep skip2 st2  // v26 step20: v26 Init signature (no packed c_r)
     cmC2[0].Init(  8*4096*4096, 3, c_s[0], c_s3[0],&STA6[0][0], c_s4[0],0xf0,1,&st2_p1[0]);
@@ -4186,7 +4267,10 @@ void __attribute__ ((noinline)) updateSen(int i=0) {
     if (i==0 && colcxt.isTemp==false) worcxt1.Reset();
 }
 
-int xmlS=0; // v26 step19 (xml.p() 9-bit state; mxA[16] context arrives in step 23)
+int xmlS=0; // v26 step19 (xml.p() 9-bit state; consumed by mxA[16], step 23)
+
+int mp0=0,mp1=0,mp2=0,mp3=0; // v26 step24: mxA2 bank outputs (stretched domain)
+U8 mstate=0;                 // v26 step24: STA2 bit-history of the global stream (mmmO context)
 
 // Main context parsing and prediction
 int modelPrediction(int c0,int bpos,int c4){
@@ -5324,8 +5408,22 @@ int modelPrediction(int c0,int bpos,int c4){
     for (int i=0;i<9;i++) cmcr[i].mix();  // v26 step18
     for (int i=0;i<4;i++) cmcr2[i].mix(); // v26 step18
     rcmA[0].mix();
+    // (v26 step25: dcsm mixes land here in exp/030)
+
+    mstate=STA2[mstate][x.y]; // v26 step24
 
     AddPrediction(squash(64));  // FP mixer bias
+    model_predictions1[prediction_index-1]=64; // v26 step24: exact stretched-domain bias mirror
+
+    // Mixers (v26 step23: L1/L2 contexts; ordX here is the pre-adjust value, as in v26)
+    mxA1[0].cxt=(ordX*8 + (BrFcIdx?1:0)*4 + (stream2b&3))*2+(words&1);
+//    mxA1[1].cxt=0;
+    mxA1[2].cxt=stream2b&0x3f;
+    mxA1[3].cxt=(stream2b&3)*4+wrt_2b[c0b&255];
+    mxA1[4].cxt=ordX*4+wrt_2b[c0b&255];
+//    mxA1[5].cxt=0;
+
+    mxA[17].cxt=PState*16+(stream2b&15); // v26 step23 (step12 deferred consumer)
 
     // Mixer
 
@@ -5340,12 +5438,12 @@ int modelPrediction(int c0,int bpos,int c4){
     // at bpos=0   context is last 2 bit2word and 1 bit3word
     // at bpos=1-3 context is last 2 bit2word and first char/bracket index (max 7)
     // at bpos=4-7 context is last 1 bit2word, current bit2word from c0 and bit3word of current bracket or quote
-    if (bpos==0)  mxA[0].cxt=(stream2b&255)*8 + (stream3b&7);
+    if (bpos==0)  mxA[0].cxt=(stream2bR&4095)*8 + (stream3b&7); // v26 step23: widened, stream2bR at bpos 0
     else if (bpos>3) {
         c=wrt_2b[c0b&255];
-        mxA[0].cxt=(((stream2b<<2)&255)+c)*8+BrFcIdx;
+        mxA[0].cxt=(((stream2b<<2)&4095)+c)*8+BrFcIdx;// no 4095   // v26 step23: widened
     } else    
-        mxA[0].cxt=(stream2b&255)*8 +BrFcIdx;
+        mxA[0].cxt=(stream2b&4095)*8 +BrFcIdx; // v26 step23: widened
 
     // mixer 1
     // at bpos=0   context is was byte(3,4) a word and 2 bit3word
@@ -5363,12 +5461,21 @@ int modelPrediction(int c0,int bpos,int c4){
     mxA[1].cxt=c;
 
     // mixer 2
-    // at bpos=0-7   context is was byte(3,4) a word, sum of context order(3-5,6,8) isState counts (max 5) and last 3 bit2word
-    mxA[2].cxt=((4 * words) & 0xf0)*4 + ordX*256*4 + (stream2b & 63);
+    // at bpos=0-7   context is was byte(3,4) a word, sum of context order(3-5,6,8) isState counts (max 5) and last 2 bit2word
+    mxA[2].cxt=((4 * words) & 0xf0) + ordX*256 + (stream2b & 15); // v26 step23: narrowed (M 6144->1536)
     
     // mixer 6
-    // at bpos=0-7   context is non-repeating 2 bit3word of byte(2,3), was byte(1-3) a word and last 1 bit2word
-    mxA[6].cxt=((stream3bR) & 0xff8)*4 + ((2 * words) & 0x1c) + (stream2b & 3);
+    // at bpos=0   context is non-repeating 2 bit3word of byte(2,3), first char/bracket index (max 7) and last 1 bit2word
+    // at bpos=1-3 context is non-repeating 2 bit3word of byte(2,3), was byte(1-3) a word and last 1 bit2word
+    // at bpos=4-7 context is non-repeating 2 bit3word of byte(2,3), last 1 bit2word and last partialy decoded bit2word
+    if (bpos>3) { // v26 step23: bpos-dependent context
+        c=wrt_2b[c0b&255];
+        mxA[6].cxt=((stream3bR) & 0xff8)*4 + ((stream2b & 3)*4) + (c );
+    }
+    else if (bpos==0)
+        mxA[6].cxt=((stream3bR) & 0xff8)*4 + ((4 * FcIdx) ) + (stream2b & 3);
+    else
+        mxA[6].cxt=((stream3bR) & 0xff8)*4 + ((2 * words) & 0x1c) + (stream2b & 3);
     c=c0b;
     
     // mixer 3
@@ -5381,13 +5488,6 @@ int modelPrediction(int c0,int bpos,int c4){
     // at bpos=6   context is bit 111111xx from c0, was byte(1-2) a word or space and bit pos
     // at bpos=7   context is bit 1111111x from c0, was byte(1)   a word or space and bit pos
     mxA[3].cxt=bpos*256 + (((( (numbers|words)<< bpos)&255)>> bpos) | (c&255));
-
-    // mixer 10 - final mixer
-    // at bpos=0-7   context is sum of context order(3-5,6,8) isState counts (max 5), 
-    // bracket or quote state(0,1) 
-    // last 1 bit2word
-    // was last byte a word
-    mxA[10].cxt=(ordX*8 + (BrFcIdx?1:0)*4 + (stream2b&3))*2+(words&1);
 
     // mixer 4 
     // at bpos=0   context is bit xxxxxxxx from c0, first char type state(0,1) xxxx1xxx, 2 bit2word            1111xxxx
@@ -5434,8 +5534,17 @@ int modelPrediction(int c0,int bpos,int c4){
     else
         mxA[7].cxt= ((stream3b&63)*256 +(BrFcIdx)*16 + (words&7)*2 + isParagraph)|(isMatch?128:0);
 
-    // mixer 9
-    mxA[9].cxt=(x.bpos<<8)*4+(fails&3)*256 + lstmex;
+    // mixer 9 (v26 step23: fx2's bpos/fails/lstmex context is displaced to mxA[18])
+    mxA[9].cxt=(stream3bR&511)*16*16+FcIdx*32+isParagraph*16+(lastWT&15);
+    // v26 step23: new L0 mixer contexts
+    mxA[10].cxt=(x.c4&0xffff);
+    mxA[11].cxt=(stream3b&0x3f)*256 +x.c0;
+    mxA[12].cxt=oldwt1+(stream2bR&255)*32; // step16 deferred consumer
+    mxA[13].cxt=(stream3bR&511);
+    mxA[14].cxt=(BrFcIdx*8+FcIdx)*8+wrt_3b[c0b&255];
+    mxA[15].cxt=(numbers|words)*16+(stream2bR&15);
+    mxA[16].cxt=xmlS&1023; // step19 deferred consumer (isXML-gated below)
+    mxA[18].cxt=(x.bpos<<8)*4+(fails&3)*256 + lstmex; // integration extra: fx2 lstmex mixer kept
 
     x.mxInputs1.add(stretch(lstmpr)); prediction_index--;
     x.mxInputs2.add(mxA[0].p1());
@@ -5448,8 +5557,23 @@ int modelPrediction(int c0,int bpos,int c4){
     x.mxInputs2.add(mxA[7].p1());
     x.mxInputs2.add(mxA[8].p1());
     x.mxInputs2.add(mxA[9].p1());
+    x.mxInputs2.add(mxA[10].p1()); // v26 step23
+    x.mxInputs2.add(mxA[11].p1());
+    x.mxInputs2.add(mxA[12].p1());
+    x.mxInputs2.add(mxA[13].p1());
+    x.mxInputs2.add(mxA[14].p1());
+    x.mxInputs2.add(mxA[15].p1());
+    if (isXML==true) x.mxInputs2.add(mxA[16].p1()); else  x.mxInputs2.add(0); // v26 step23: add-zero discipline when gated
+    x.mxInputs2.add(mxA[18].p1()); // integration extra (lstmex mixer)
     x.mxInputs2.add(stretch(lstmpr)/2); prediction_index--;
-    return squash((mxA[10].p1()*7+mxA[11].p1()+4)>>3);
+    x.mxInputs4.add(mxA[17].p1()); // v26 step23
+    //l2
+    x.mxInputs4.add(mxA1[0].p1());
+    x.mxInputs4.add(mxA1[1].p1());
+    x.mxInputs4.add(mxA1[2].p1());
+    x.mxInputs4.add(mxA1[3].p1());
+    x.mxInputs4.add(mxA1[4].p1());
+    return (mxA1[5].p()); // v26 step23: L2 final
 }
 
 int rate=6;
@@ -5463,9 +5587,9 @@ void update1() {
         // When last byte was predicted good/below error treshold then set new limits to mixer update
         // larger value means less updates and better speed.
         if ((fails&255)==0) {
-            for (int i=0;i<10;i++) mxA[i].elim=max(256+63,mxA[i].elim+1);  // v26 step4: WUS cap 319
+            for (int i=0;i<19;i++) mxA[i].elim=max(256+63,mxA[i].elim+1);  // v26 step4+23: WUS cap 319 over the full L0 bank (incl. mxA[18] extra)
         }else{ 
-            for (int i=0;i<10;i++) mxA[i].elim=max(0,min(16,mxA[i].elim-1));
+            for (int i=0;i<19;i++) mxA[i].elim=max(0,min(16,mxA[i].elim-1));
         }
         sscmrate=(x.blpos>14*256*1024);
         // APM update rate based on input file position
@@ -5477,22 +5601,18 @@ void update1() {
     x.c0shift_bpos=(x.c0<<1)^(256>>(x.bposshift));
     x.cmBitState=getStateByteLocation(x.bpos,x.c0); // v26 step20
 
-    mxA[0].update(x.y);
-    mxA[1].update(x.y);
-    mxA[2].update(x.y);
-    mxA[3].update(x.y);
-    mxA[4].update(x.y);
-    mxA[5].update(x.y);
-    mxA[6].update(x.y);
-    mxA[7].update(x.y);
-    mxA[8].update(x.y);
-    mxA[9].update(x.y);
-    mxA[10].update(x.y);
-    mxA[11].update(x.y);
+    for (int i=0;i<16;i++)    mxA[i].update(x.y); // v26 step23
+    if (isXML) mxA[16].update(x.y); // v26 step23: gated update (easy to misport into i<18)
+        mxA[17].update(x.y);
+    mxA[18].update(x.y); // integration extra (lstmex mixer)
+    for (int i=0;i<6;i++) mxA1[i].update(x.y); // v26 step23
+    for (int i=0;i<4;i++) mxA2[i].update(x.y); // v26 step24 (trains on the previous bit's prediction vector)
     //printf("mixer 0 predictor count %d\n",x.mxInputs1.ncount);
     x.mxInputs1.ncount=0;
     //printf("mixer 1 predictor count %d\n",x.mxInputs2.ncount);
     x.mxInputs2.ncount=0;
+    //printf("mixer 2 predictor count %d\n",x.mxInputs4.ncount);
+    x.mxInputs4.ncount=0; // v26 step23
     // This part is from paq8hp12
     if (fails&0x00000080) --failcount;
     fails=fails*2;
@@ -5530,7 +5650,28 @@ void update1() {
     if (fails&255) pr=(pt*6+pu  +pv*11+pz*14 +31)>>5;
     else           pr=(pt*4+pu*7+pv*12+pz*9 +31)>>5;
     AddPrediction(pr);
+    //l 4
+    // v26 step24: integer fp-mixer bank + mmmO final chain. Kept INSIDE fxcm exactly as the
+    // standalone does it (integer-deterministic); do NOT route these through cmix's
+    // floating-point mixers. Comma-sequenced update-then-predict is load-bearing; keep as-is.
+    mxA2[0].cxt=c1;
+    mxA2[1].cxt=c2;
+    mxA2[2].cxt=(stream5b)&0x7fff;
+    mxA2[3].cxt=stream2b&0xffff;
+    mp0=mxA2[0].p1();
+    mp1=mxA2[1].p1();
+    mp2=mxA2[2].p1();
+    mp3=mxA2[3].p1();
 
+    pu=stretch(pr); // dead store in v26 too; kept for diffability
+
+    mmmO[0].update(x.y),  pu=mmmO[0].pp(0,mp0,mstate);//clp this
+    mmmO[1].update(x.y),  pu=mmmO[1].pp(pu,mp1,mstate);
+    mmmO[2].update(x.y),  pu=mmmO[2].pp(pu,mp2,mstate);
+    mmmO[3].update(x.y),  pu=mmmO[3].pp(pu,mp3,mstate);
+
+    pr=(squash(clp(pu))+pr*3)>>2;
+    AddPrediction(pr); // v26 step24 integration: post-chain final is the LAST fxcm export (cmix aux context reads it)
 }
 
 inline Predictor::Predictor()  {
