@@ -19,4 +19,5 @@ Every experiment gets a row here — **including null and negative results**. De
 ## Ledger
 | ID | Date | Branch / sha | Tier | Dataset | Bytes out | Δ vs baseline | Wall time | Peak RSS | Verdict | Notes |
 |----|------|--------------|------|---------|-----------|---------------|-----------|----------|---------|-------|
-| — | — | — | — | — | — | — | — | — | — | no experiments yet |
+| 000a | 2026-06-10 | main (mmap fix) | T0 | input2 (930,723 B) | 180,611 | baseline | 5m47s c / 5m50s d | n/a | ✅ round-trip OK | lab1, PGO build, S1=441,983 |
+| 000b | 2026-06-10 | main (mmap fix) | T3 | enwik9 | *running* | baseline anchor | est. ~65–75 h | — | ⏳ launched | lab1 core 0, /mnt/work/baseline, expect S2≈110.35 MB |
