@@ -5656,6 +5656,7 @@ void update() {
             if (mtf == (FILE*)-1) {
                 const char* e = getenv("FXTRACE3");
                 mtf = e ? fopen(e, "w") : NULL;
+                if (mtf) setvbuf(mtf, NULL, _IONBF, 0);
                 if (mtf) fprintf(mtf, "BASES %p %p\n", (void*)cmC4, (void*)cmCR);
             }
             g_mixtrace = (mtf && bitn >= 8015 && bitn <= 8021) ? mtf : NULL;
