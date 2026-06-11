@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7;
+int num_models = 439+1-2-7-2;  // v26 port: SparseMatchModel removed (-2)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -3323,7 +3323,7 @@ void PredictorInit() {
     worcxt2.Init();
     htcxt.Init(&html[0],2,false,0xfff);
 
-    smatch.Init();
+    //smatch.Init();  // v26 port: SparseMatchModel removed
     cWord=&StemWords[0], pWord=&StemWords[3];
 }
 
@@ -4507,7 +4507,7 @@ int modelPrediction(int c0,int bpos,int c4){
     scmA[6].mix(sscmrate);
 
     isMatch=MatchModel2mix();
-    smatch.p();
+    //smatch.p();  // v26 port: SparseMatchModel removed
     // Order X
     ordX=0;
     if (cmC2[0].cxtMask) ordX=2;
