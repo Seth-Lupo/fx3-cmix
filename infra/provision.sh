@@ -18,8 +18,8 @@ done
 # centralus + westcentralus: the two regions offering v3/v4 SKUs to this student
 # subscription (eastus/westus2/etc return NotAvailableForSubscription). Quotas are
 # PER-REGION (6 on-demand + 3 spot vCPUs each) — override LOC to tap the second pool.
-RG=hutter-lab
 LOC="${LOC:-centralus}"
+RG="${RG:-hutter-lab}"   # use a region-local RG (e.g. RG=hutter-wcus) when LOC != centralus
 
 az group create -n $RG -l $LOC -o none
 
