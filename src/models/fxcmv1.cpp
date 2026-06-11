@@ -2186,11 +2186,14 @@ struct WordsContext {
     int wordcount,upper;
     U32 codesum;          // v26 step10
     int ref;
-    int worInPar=0,worInLink=0; // v26 step13: words-in-paragraph/-link counts (write-only until step 17)
+    bool paragraph;             // v26 step17: line/sentence was a paragraph when captured (write-only in v26)
+    int maxc=0;                 // v26 step17: dead in v26 too, carried for struct parity
+    int worInPar=0,worInLink=0; // v26 step13: words-in-paragraph/-link counts (write-only in v26)
     void Init() {
         vec_new(&sbytes);
         vec_new(&type);
         vec_new(&stem);
+        Reset(); // v26 step17
     }
     void Reset(){
         vec_reset(&sbytes);
@@ -2202,6 +2205,7 @@ struct WordsContext {
         codesum=0;            // v26 step10
         tpbyte=0;             // v26 step13
         worInPar=0,worInLink=0; // v26 step13
+        paragraph=false; // v26 step17
     }
     void Set(U8 b,int a=0,U8 g=0){ // v26 step13: 3rd arg feeds tpbyte
         pbyte=b;upper=a;tpbyte=g;
@@ -2230,6 +2234,11 @@ struct WordsContext {
         const int num=vec_size(&stem);
         if (num>=i) return vec_at(&stem,num-(i));
         else return 0;
+    }
+    // Reverse order word // v26 step17
+    U32  __attribute__ ((noinline)) WordR(int i=1){
+        int low=min(wordcount,i);
+        return Word(wordcount-low);
     }
     // v26 step13: previous-word hash with position multiplier ladder;
     // extra multiplier when the word ended at LF (aged via the wshift block)
@@ -2274,6 +2283,11 @@ struct WordsContext {
     U32  __attribute__ ((noinline)) CodeR(int i,int j=1){
         int low=min(wordcount,j);
         return Code(i+(wordcount-low));// i+, is it ok?
+    }
+    // Reverse order word of type t if any. // v26 step17
+    U32  __attribute__ ((noinline)) LastR(int i,int j=1, U32 t=0){
+        int low=min(wordcount,j);
+        return Last(i+(wordcount-low),t);// i+, is it ok?
     }
     // Return last word matching verb, ... If not found return 0
     U32  __attribute__ ((noinline)) Last(int j=1, U32 t=0){
@@ -2336,6 +2350,68 @@ struct WordsContext {
                 }
             }
         }
+    }
+};
+
+// v26 step17: 64-sentence memory per group; similarity = codeword overlap >= 53%
+#define SIMILARWORDS 64
+struct SentenceContext {
+    WordsContext sentence[SIMILARWORDS]; // List of sentences, max 64
+    WordsContext empty;        // blank
+    int sindex;
+    U32 total;
+    void Init() {
+        for (int i=0; i<SIMILARWORDS; i++) sentence[i].Init();
+        empty.Init();
+        sindex=total=0;
+    }
+    void Reset() {
+        for (int i=1; i<SIMILARWORDS; i++) sentence[i].Reset();
+        sindex=total=0;
+    }
+    void  __attribute__ ((noinline)) Update(WordsContext *w) {
+        if (w->wordcount) {
+            memcpy(&sentence[sindex],w,sizeof(WordsContext));
+            sindex=(sindex+1)&(SIMILARWORDS-1);
+            total++;
+        }
+    }
+    WordsContext *Sentence(int i) {
+        return &sentence[(sindex-i)&(SIMILARWORDS-1)];
+    }
+    WordsContext __attribute__ ((noinline)) *SimilarSentence(WordsContext *wor,int wcount,U32 pres=53) {
+        U32 isSimilar=0,isSimilarIdx=0;
+        U32 codesum=0; // input
+        if (wcount>=1) {
+            for (int i=0; i<SIMILARWORDS; i++) {
+                if (sentence[i].wordcount && sentence[i].wordcount<= wcount && sentence[i].wordcount>(wcount/2)) {
+                    for (int k=0; k<wcount; k++) {
+                        U32 curcode=wor->Code(wcount-k); //get word code of current sentance
+                        // loop over and compare codewords
+                        if (curcode) {
+                            for (int j=0; j<sentence[i].wordcount; j++) {
+                                U32 testcode=sentence[i].Code(sentence[i].wordcount-j);
+                                if (testcode) {
+                                    U32 diff=(curcode-testcode);
+                                    if (diff==0) {
+                                        codesum++;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (codesum> isSimilar) isSimilar=codesum,isSimilarIdx=i+1;
+                    codesum=0;
+                }
+            }
+            if (isSimilar) {
+                isSimilar=isSimilar*100/wcount;
+                if (isSimilar<pres) isSimilar=isSimilarIdx=0;// if below 53% similar then skip
+            }
+        }
+        if (isSimilarIdx) return &sentence[isSimilarIdx-1];
+        else return &empty;
     }
 };
 
@@ -3333,6 +3409,8 @@ bool isHTTAG=false;         // v26 step13: inside html/xml tag words
 bool wasTag=false;          // v26 step13: tag seen on this line
 U32 lastPTOP=-1,pageParag=0,pageSent=0; // v26 step12: short-page shift register + per-page counts (consumed by step 22's cmC[1] reset cadence)
 bool isLongTOP=false;       // v26 step12 (write-only in v26 too)
+bool wasVerb=false,wasNoun=false; // v26 step17 (write-only in v26 too)
+U32 wasVerbH=0,wasNounH=0;        // v26 step17 (write-only in v26 too)
 int oldwt1=0; // v26 step16: getWT3 class of last worcxt2 word (consumed by mxA[12] in step 23)
 U32 wt3b=0,wt3cxt=0,wt3cxtW=0,wt3cxtW1=0,wt4cxtW=0,wt4cxtW1=0; // v26 step16 (wt3b/wt3cxtW1 dead in v26 too)
 
@@ -3419,6 +3497,13 @@ WordsContext worcxt1;
 WordsContext worcxt2;
 WordsContext worcxt3; // v26 step13: tag words
 WordsContext worcxt0; // v26 step13: undecoded words
+
+SentenceContext sencxt;   // v26 step17: regular sentences
+SentenceContext sencxtL;  // v26 step17: lists '*'
+SentenceContext sencxtT;  // v26 step17: table
+SentenceContext sencxtCL; // v26 step17: wikilinks
+
+WordsContext *simiwor;    // v26 step17: best similar sentence (or empty)
 BracketContext<U16> htcxt;
 
 //DirectStateMap dcsm;  //1x5 inputs to fp
@@ -3529,6 +3614,12 @@ void PredictorInit() {
     worcxt2.Init();
     worcxt3.Init(); // v26 step13
     worcxt0.Init(); // v26 step13
+
+    sencxt.Init();   // v26 step17
+    sencxtL.Init();  // v26 step17
+    sencxtT.Init();  // v26 step17
+    sencxtCL.Init(); // v26 step17
+    simiwor=sencxt.SimilarSentence(&worcxt,0); // v26 step17: start at &empty
     htcxt.Init(&html[0],2,false,0xfff);
 
     //smatch.Init();  // v26 port: SparseMatchModel removed
@@ -3955,6 +4046,19 @@ void __attribute__ ((noinline)) procWord() {
     }
 }
 
+// v26 step17: route the finished line/sentence into its sentence group, then reset
+void __attribute__ ((noinline)) updateSen(int i=0) {
+    if (isParagraph) worcxt.paragraph=true;
+    if (colcxt.lastfc(1)==SQUAREOPEN && c2==SQUARECLOSE) sencxt.Update(&worcxt),sencxtCL.Update(&worcxt);
+    else if (colcxt.nlChar==WIKITABLE) sencxtT.Update(&worcxt);
+    else if (colcxt.lastfc(1)!='*')sencxt.Update(&worcxt);
+    else if (colcxt.lastfc(1)=='*' || colcxt.lastfc(1)=='#')sencxtL.Update(&worcxt);
+    worcxt.Reset();
+    wt3cxt=0;
+
+    if (i==0 && colcxt.isTemp==false) worcxt1.Reset();
+}
+
 // Main context parsing and prediction
 int modelPrediction(int c0,int bpos,int c4){
     int i,c;
@@ -3987,16 +4091,18 @@ int modelPrediction(int c0,int bpos,int c4){
             isText=false;
             PState=PText; // v26 step12
             PStateH=hash(PStateH,PState,0); // v26 step12
-            if (c1==APOSTROPHE ||c1==FIRSTUPPER){
+            if (c1!=LF){ // v26 step17: gate widened from APOSTROPHE/FIRSTUPPER
                 colcxt.Update(LF,0);
-                worcxt.Reset();
-                worcxt1.Reset();
+                updateSen(); // v26 step17
                 fc=isParagraph=firstWord=0;
                 nl1=nl;
                 nl=pos-2;
             }
         }
         if ((x.c4&0xffffff)==(((EQUALS*256)+EQUALS)*256+EQUALS)) isLongTOP=true; // v26 step12
+        if (c1==CURLYCLOSE && c2==VERTICALBAR && colcxt.nlChar==WIKITABLE) {
+            updateSen(); // v26 step17: table ended
+        }
         if (worcxt.wordcount<6 &&colcxt.isTemp && c1==CURLYCLOSE)worcxt.removeWordsL(8,CURLYOPENING,CURLYCLOSE); // v26 step13: template words dropped at '}'
         // Column context update
         colcxt.Update(c1,c4&0xffffff);
@@ -4243,20 +4349,25 @@ int modelPrediction(int c0,int bpos,int c4){
             }
             else if (c1==LF) {
                 if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
-                if (colcxt.lastfc(1)==FIRSTUPPER) pageParag++; // v26 step12
-                pageSent=pageSent+isParagraph; // v26 step12 (before isParagraph is zeroed below)
-                fc=isParagraph=firstWord=lastWT=0;
                 nl1=nl;
                 nl=pos-1;
                 stream3bR=(stream3bR<<7);
                 stream2b=stream2b|0x3fc;
                 words=0xfc;
-                worcxt.Reset();
-                worcxt1.Reset();
-                wt3cxt=0; // v26 step16
+                updateSen(); // v26 step17: replaces worcxt/worcxt1 resets (worcxt1 kept in templates)
                 stream2bR=stream2bR<<2;
                 stream4b=stream4b|0xfff0;
+                if (colcxt.lastfc(1)==FIRSTUPPER) pageParag++; // v26 step12
+                pageSent=pageSent+isParagraph; // v26 step12 (updateSen above also reads isParagraph)
+                fc=isParagraph=firstWord=lastWT=0;
                 if (c2==LF)isNowiki=false;
+                if (!(colcxt.isTemp || colcxt.nlChar==WIKITABLE)) { // v26 step17: LF bracket/quote reset outside templates/tables
+                    brcxt.Reset();
+                    qocxt.Reset();
+                }
+                wt3cxt=0; // v26 step16
+                wasVerb=wasNoun=false; // v26 step17 (nestList reset joins this line in step 18)
+                wasVerbH=wasNounH=0;   // v26 step17
             }
             else if (c1=='.' || c1==')' || c1==QUESTION) {
                 lastWT=lastWT*16;
@@ -4272,6 +4383,10 @@ int modelPrediction(int c0,int bpos,int c4){
 
                     // We ignore sentance ending dot when we are in [], (), table or line is a list.
                     if (!(fccxt.cxt==SQUAREOPEN  ||  fccxt.cxt=='(' ||colcxt.nlChar==WIKITABLE || colcxt.lastfc()=='*' )) {
+                        if (isParagraph) worcxt.paragraph=true; // v26 step17
+                        sencxt.Update(&worcxt); // v26 step17: capture sentence at '.'
+                        wasVerb=wasNoun=false; // v26 step17
+                        wasVerbH=wasNounH=0;   // v26 step17
                         worcxt.Reset();
                         wt3cxt=0; // v26 step16
                         if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
@@ -4281,6 +4396,8 @@ int modelPrediction(int c0,int bpos,int c4){
                 if ( c1==')' ) senword=0;
             }
             else if (c1==',') {
+                wasVerb=wasNoun=false; // v26 step17
+                wasVerbH=wasNounH=0;   // v26 step17
                 if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
                 words=words|0xfc;
                 senword=0;
@@ -4288,8 +4405,8 @@ int modelPrediction(int c0,int bpos,int c4){
             else if (c1=='(' ) {
                 senword=0;
             }
-            else if (c1==SEMICOLON) {
-                worcxt.Reset();
+            else if (c1==SEMICOLON && colcxt.nlChar!=WIKITABLE) { // v26 step17
+                updateSen(1);
             }
             // Probably link, word list - this can probably be better
             else if (c1==COLON) {
@@ -4540,6 +4657,12 @@ int modelPrediction(int c0,int bpos,int c4){
                utf8left--;
                if ((c1>>6)!=2) utf8left=0; 
            }
+        }
+
+        // looks like this is not used? // v26 step17 (write-only in v26 too)
+        if (isParagraph) {
+            if (wasVerb==false && (worcxt.Type()&Verb)==Verb) wasVerb=true,wasVerbH=worcxt.Word();
+            else if (wasNoun==false && (worcxt.Type()&Noun)==Noun) wasNoun=true,wasNounH=worcxt.Word();
         }
 
         h=h+numberA+c1; // v26 step14
