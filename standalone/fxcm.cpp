@@ -5629,15 +5629,16 @@ void update() {
             trf2 = e ? fopen(e, "wb") : NULL;
         }
         if (trf) { fputc(pr&255, trf); fputc((pr>>8)&255, trf); }
-        if (trf2 && bitn >= 7900 && bitn <= 8030) {
+        if (trf2 && bitn >= 0 && bitn <= 8030) {
             U32 hdr[2] = {(U32)bitn, prediction_index};
             fwrite(hdr, 4, 2, trf2);
-            fwrite(model_predictions1, 2, prediction_index, trf2);
-            fwrite(prediction_lines, 4, prediction_index, trf2);
             for (int k = 0; k < 9; k++) {
                 U32 h2[2] = {(U32)k, (U32)cmC4[k].cn};
                 fwrite(h2, 4, 2, trf2);
-                fwrite(cmC4[k].cxt, 4, cmC4[k].cn, trf2);
+                for (int i = 0; i < cmC4[k].cn; i++) {
+                    U32 off = cmC4[k].cp0[i] ? (U32)(cmC4[k].cp0[i] - (U8*)cmC4[k].t) : 0xffffffff;
+                    fwrite(&off, 4, 1, trf2);
+                }
             }
         }
         bitn++;
