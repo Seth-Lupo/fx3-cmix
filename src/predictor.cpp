@@ -53,7 +53,7 @@ void Predictor::AddBracket() {
 }
 
 void Predictor::AddPPMD() {
-  byte_model_.emplace(25, 14000, manager_.bit_context_, vocab_);
+  byte_model_.emplace(25, 1750, manager_.bit_context_, vocab_);
 }
 
 void Predictor::AddWord() {
