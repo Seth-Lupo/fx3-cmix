@@ -3207,8 +3207,8 @@ APM<256>  apmA0;
 APM<0x8000*2>  apmA1;
 APM<0x8000*2>  apmA2;
 APM<0x20000*2>  apmA3;
-APM<0x20000*2>  apmA4;
-APM<0x20000*2>  apmA5;
+APM<0x20000>  apmA4;  // v26 step5: halved
+APM<0x20000>  apmA5;  // v26 step5: halved
 RunContextMap rcmA[1];
 BracketContext<U8> brcxt;
 BracketContext<U8> qocxt;
@@ -3299,7 +3299,7 @@ void PredictorInit() {
     cmC2[12].Init( 8*4096*4096,2|(c_r[20]<<8)|(c_s[20]<<16),c_s3[20],&STA6[0][0],c_s4[20],0xf0,1,&st2_p1[0]);
     cmC2[13].Init(16*4096*4096,2|(c_r[21]<<8)|(c_s[21]<<16),c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
 
-    cmC[3].Init(     32*4096,2|(c_r[22]<<8)|(c_s[22]<<16),c_s3[22],&STA2[0][0],c_s4[22],0x00,1,&st2_p2[0]);
+    cmC[3].Init(     32*4096,2|(c_r[22]<<8)|(c_s[22]<<16),c_s3[22],&STA2[0][0],c_s4[22],0x00,1,&st2_p1[0]);  // v26 step3: st2_p2 retired
 
     cmC2[14].Init(4*4096*4096/2,1|(c_r[23]<<8)|(c_s[23]<<16),c_s3[23],&STA6[0][0],c_s4[23],0xf0,1,&st2_p1[0]);
     cmC2[15].Init(   8*64*4096,1|(c_r[24]<<8)|(c_s[24]<<16),c_s3[24],&STA1[0][0],c_s4[24],0,0,&st2_p0[0]);
@@ -4686,7 +4686,7 @@ void update1() {
         // When last byte was predicted good/below error treshold then set new limits to mixer update
         // larger value means less updates and better speed.
         if ((fails&255)==0) {
-            for (int i=0;i<10;i++) mxA[i].elim=max(256,mxA[i].elim+1);
+            for (int i=0;i<10;i++) mxA[i].elim=max(256+63,mxA[i].elim+1);  // v26 step4: WUS cap 319
         }else{ 
             for (int i=0;i<10;i++) mxA[i].elim=max(0,min(16,mxA[i].elim-1));
         }
@@ -4741,13 +4741,13 @@ void update1() {
     AddPrediction(pv);
     // If fails use stream2b else non-repeating stream2b
     if (fails&255)
-        pv=apmA4.p(pv, hash(x.c0,stream2b & 0xfffc,(stream3bR & 0x1ff))&0x3ffff, rate,x.y);
+        pv=apmA4.p(pv, hash(x.c0,stream2b & 0xfffc,(stream3bR & 0x1ff))&0x1ffff, rate,x.y);
     else
-        pv=apmA4.p(pv, hash(x.c0,(stream2bR & 0xfffc)+0x10000,(stream3bR & 0x1ff))&0x3ffff, rate,x.y);
+        pv=apmA4.p(pv, hash(x.c0,(stream2bR & 0xfffc)+0x10000,(stream3bR & 0x1ff))&0x1ffff, rate,x.y);
     AddPrediction(pv);
     pt=apmA2.p(pr, ( (x.c0*32)^AH2)&0xffff, rate,x.y);
     AddPrediction(pt);
-    pz=apmA5.p(pu,   ((x.c0*4)^hash(min(9,pz),x5&0x80ff))&0x3ffff, rate,x.y);
+    pz=apmA5.p(pu,   ((x.c0*4)^hash(min(9,pz),x5&0x80ff))&0x1ffff, rate,x.y);
     AddPrediction(pz);
     if (fails&255) pr=(pt*6+pu  +pv*11+pz*14 +31)>>5;
     else           pr=(pt*4+pu*7+pv*12+pz*9 +31)>>5;
@@ -4776,7 +4776,7 @@ inline Predictor::Predictor()  {
     x.Init();
 
     for (int i=0;i<4096;i++) {
-        st2_p1[i]=clp(sc(12*(i - 2048)));
+        st2_p1[i]=clp(sc(13*(i - 2048)));  // v26 step3: 12->13
         st2_p2[i]=clp(sc(14*(i - 2048)));
     }
     // Match model
