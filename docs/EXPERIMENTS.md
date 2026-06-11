@@ -28,7 +28,9 @@ Every experiment gets a row here — **including null and negative results**. De
 | 005 | 2026-06-11 | main (PGO build) | T0 | text_1M | 71,298 | **−47 vs plain** | 4m54s | — | ⚠️ build-config sensitivity | lab1; PGO+LTO changes FP rounding → different (slightly better) output. Rule: experiments plain-vs-plain; final numbers always with submission build recipe |
 
 | 006 | 2026-06-11 | exp/006-lstm-lr016 | T0 | text_1M | 71,453 | **+108** | 5m18s | 5.73 GB | ❌ reject | LSTM lr 0.03→0.016 worse; 0.03 near-tuned |
-| 007 | 2026-06-11 | exp/007-ppm-order26 | T0 | text_1M | *running* | — | — | — | ⏳ | PPM order 25→26 (PPM survives fx3 pivot) |
+| 007 | 2026-06-11 | exp/007-ppm-order26 | T0 | text_1M | 71,284 | −61 | 5m32s | 5.72 GB | 🟡 weak positive | below 300B bar; revisit at T1 after fx3 pivot (PPM context changes there) |
+| 004 | 2026-06-11 | main | T1-mid | text_mid10M | 1,620,639 | anchor | 1h00m* | 5.96 GB | ✅ anchor | mid-file slice; *wall contaminated by debug contention |
+| — | 2026-06-11 | exp/order-v26 | — | — | — | author-measured −147,767 | — | — | 🎯 queued for T3 | kaitz's 2025-04 article order recovered (see ARTICLE-ORDER-NOTES.md); needs full-run validation after baseline completes |
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
