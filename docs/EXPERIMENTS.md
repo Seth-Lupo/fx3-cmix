@@ -104,3 +104,6 @@ Next: per-byte scalar dump (pos, word0, wp[word0], indirectWord0Pos, numberA, in
 
 | 036 all | 2026-06-11 | exp/036-reset-cadence | T0 | text_1M | 70,311 ×4 | **sane=c2=c8=off, all identical** | ~9m each | 7.6 GB | 🔬 **T0 is BLIND for resets** | the page-end reset trigger (cwPAGE codeword sequence) never fires inside the 1MB slice — cadence question promoted to T1 (queueC armed: 036c2-t1, 036off-t1). Methodology datum: structural/boundary-triggered features need slices containing the trigger |
 | 037sane | 2026-06-11 | exp/037-sta-tune | T0 | text_1M | 70,311 | ±0 ✓ gate green | 9m25s | 7.6 GB | ✅ sanity | STA6/7 wide grid (mdc±4, b5±1) running on core 2 |
+
+| 032-t1 | 2026-06-11 | exp/032-cmC2-4-rollback | T1 | text_10M | 1,051,498 | **±0 vs tip — FREE** | 1h20m | 7.64 GB | ✅ **adopt as RAM trim** | cmC2[4] 16→8×4096×4096 = −256 MiB at zero size cost through T1. Banked trims now: 031 −35MiB + 032 −256MiB + dcsm-27bit −256MiB ≈ −547MiB |
+| 037 wide | 2026-06-11 | exp/037-sta-tune | T0 | text_1M | 70,308–70,353 | s6m18 +6, s6m26 −3, s6b2 +1, s6b4 +42 | ~9m each | 7.6 GB | ❌ null (closes STA line) | even mdc±4 and b5±1 on STA6 are sub-threshold — state-table generator params are at a flat optimum; STA7 points finishing then line closed |
