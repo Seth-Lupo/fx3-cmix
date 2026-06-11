@@ -14,6 +14,7 @@ Every experiment gets a row here — **including null and negative results**. De
 
 ## Findings log
 - **2026-06-10 — fx2-cmix crashes on Linux 6.x kernels (fixed).** The PPM `mmap_to_disk` RSS-dropping cycle (`ppmd.cpp` ByteUpdate, every 20,000 bytes) did `munmap` + `mmap(NULL,…)` and relied on the kernel reusing the same address; ppmd stores absolute pointers into that heap. Linux 6.8 (Ubuntu 22.04 Azure) places the remap elsewhere → deterministic SIGSEGV at the first remap (39.95% of the PGO input). Fixed with an atomic `MAP_FIXED` remap at the original address; output verified byte-identical to `mmap_to_disk=false` (md5 `0888f9d854f06b21d210fef7c13a5562` both ways). Implication: the published fx2-cmix binary is kernel-sensitive — worth noting in any submission write-up; also means judge-machine kernel matters.
+- **2026-06-11 — spot evictions**: 2 evictions in ~5h on centralus E2s_v3 spot. Policy: spot1 = sub-hour jobs only; ≥6h runs go on lab1 (on-demand). T2 calibration moved to lab1 post-586M (~Jun 12).
 - **2026-06-10 — VM platform**: lab1 = Xeon Platinum 8272CL (Cascade Lake), same µarch generation as fx2's reference c2-standard-4. `-march=corei7` cannot build (fxcmv1 requires AVX2); usable march values: `native`, `znver2`, or ≥haswell.
 
 ## Ledger
@@ -42,7 +43,9 @@ Every experiment gets a row here — **including null and negative results**. De
 | next-1 | 2026-06-11 | next-fx3 (008+009+010) | T1 | text_10M | 1,065,539 | **+2** | 1h01m | 6.03 GB | ✅ no regression | steps 1-3 neutral at T1 as expected (capacity gains need scale); PPM-in-RAM RSS fine |
 
 | 011 | 2026-06-11 | exp/011-rm-sparsematch | T0 | text_1M | 71,332 | −13 | 7m57s | 5.72 GB | ✅ adopt+merged | SparseMatchModel removed; num_models 461→459; export plumbing OK |
-| 012 | 2026-06-11 | exp/012-rm-4sscm | T0 | text_1M | *running* | — | — | — | ⏳ | drop scmA[1,2,4,6] per map step 7; expect num_models 455 |
+| 012 | 2026-06-11 | exp/012-rm-4sscm | T0 | text_1M | 71,352 | +7 | 8m02s | 5.72 GB | ⚠️ superseded | num_models edit no-op'd (branched off main); 4 dead exports — robustness datum |
+| 012b | 2026-06-11 | exp/012b-rm-4sscm | T0 | text_1M | 71,342 | −3, num_models 455 ✓ | 7m57s | 5.75 GB | ✅ adopt+merged | clean 4-SSCM removal atop next-fx3 |
+| 013 | 2026-06-11 | exp/013-knobs-345 | T0 | text_1M | *running* | — | — | — | ⏳ | v26 steps 3-5: st2_p1 13×+retire p2, WUS cap 319, APM A4/A5 halved (−16.5 MiB); relaunched after 2nd spot eviction |
 
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
