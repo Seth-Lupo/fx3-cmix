@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15)
+int num_models = 439+1-2-7-2-4+5+4+15;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -3333,6 +3333,9 @@ bool isHTTAG=false;         // v26 step13: inside html/xml tag words
 bool wasTag=false;          // v26 step13: tag seen on this line
 U32 lastPTOP=-1,pageParag=0,pageSent=0; // v26 step12: short-page shift register + per-page counts (consumed by step 22's cmC[1] reset cadence)
 bool isLongTOP=false;       // v26 step12 (write-only in v26 too)
+int oldwt1=0; // v26 step16: getWT3 class of last worcxt2 word (consumed by mxA[12] in step 23)
+U32 wt3b=0,wt3cxt=0,wt3cxtW=0,wt3cxtW1=0,wt4cxtW=0,wt4cxtW1=0; // v26 step16 (wt3b/wt3cxtW1 dead in v26 too)
+
 enum PageState { // v26 step12
     PNone     =0,
     PTemplate =1,
@@ -3397,7 +3400,7 @@ ContextMap cmC[6];
 ContextMap1 cmC1[8];
 // large state memory, per context max 14 uniqe contexts state sets
 // for large amount of large contexts
-ContextMap2 cmC2[18];
+ContextMap2 cmC2[21]; // v26 step16: +[20]; [18]/[19] land in step 17
 StationaryMap maps1; // v26 step15
 StationaryMap maps2; // v26 step15
 APM<256>  apmA0;
@@ -3464,7 +3467,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4)&-16; // v26 step15: +4 StationaryMap inputs (still 512)
+    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18)&-16; // v26 step15: +4 StationaryMap; step16: +18 cmC2[20] -> N=528 (S=560)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -3511,6 +3514,7 @@ void PredictorInit() {
 
     cmC2[16].Init( 1*4096*4096/2,1|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
     cmC2[17].Init( 2*4096*4096,2|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
+    cmC2[20].Init( 8*4096*4096,3|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]); // v26 step16
 
     cmC1[6].Init(1*16*4096,1|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0,0,&st2_p1[0]);
 
@@ -3846,6 +3850,32 @@ int getWT(U32 t){
     else if (t) return 14;
     else return 15;
 }
+
+// v26 step16: finer word-type class for the sentence type hashes (and step-23 mixer ctx)
+int __attribute__ ((noinline)) getWT3(U32 t) {
+    if      (t&Verb) return 1;
+    else if (t&Noun) return 2;
+    else if (t&Adjective) return 3;
+    else if (t&Plural) return 4;
+    else if (t&PastTense) return 5;
+    else if (t&PresentParticiple) return 6;
+    else if (t&AdjectiveSuperlative) return 7;
+    else if (t&AdjectiveWithout) return 8;
+    else if (t&AdjectiveFull) return 9;
+    else if (t&AdverbOfManner) return 10;
+    else if (t&Suffix) return 11;
+    else if (t&Prefix) return 12;
+    else if (t&Male) return 13;
+    else if (t&Female) return 14;
+    else if (t&Article) return 15;
+    else if (t&Conjunction) return 16;
+    else if (t&Adposition) return 17;
+    else if (t&Number) return 18;
+    else if (t&Preposition) return 19;
+    else if (t&ConjunctiveAdverb) return 20;
+    else if (t&Pronoun) return 21;
+    else return 0;
+}
 // Update string and stemm when string ends
 void setbufstem(char c){
     // Allow:
@@ -4111,6 +4141,13 @@ int modelPrediction(int c0,int bpos,int c4){
             // Reset only when not '[word word ...'
             if (word00   && !(fccxt.cxt==SQUAREOPEN)) word00=0;
             if (word0){
+                if (wt3cxt==0 || ((worcxt.Type(1)&Article)==Article)) wt3cxtW1=wt3cxtW, wt3cxtW=0; // v26 step16
+                // Full sentance type hash
+                wt3cxt=hash(wt3cxt,getWT3(worcxt.Type(1)),worcxt.wordcount); // v26 step16
+                //Partial sentance codeword with type
+                if ((worcxt.Type(1))!=0) wt4cxtW=hash(wt4cxtW,worcxt.Code(1),worcxt.Type(1)); // v26 step16
+                // Full sentance  codeword with type excluding Nouns
+                if ((worcxt.Type(1)&Noun)==0 && (worcxt.Type(1))!=0) wt3cxtW=hash(wt3cxtW,worcxt.Code(1),worcxt.Type(1)); // v26 step16
                 // Skip some word tpyes in main word order
                 // v26 step13: blpos 463139793 gate removed; word1..3 scalars replaced by the worcxt0 stream
                 if (((*pWord).Type&(ConjunctiveAdverb+Conjunction))==0){
@@ -4184,6 +4221,7 @@ int modelPrediction(int c0,int bpos,int c4){
 
             if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) { // v26 step10+step11+step12 (per-article CM resets and the (lastPTOP&63)==63 cmC[1] reset deferred to step 22)
                 isPre=isMath=isNowiki=false;
+                wt3cxt=0; // v26 step16 (page-end worcxt.Reset() lands in step 22)
                 skipSeeExternal=isCategory=isPageStarted=false;
                 PState=PStateH=0; // v26 step12
                 lastPTOP=lastPTOP*2; // v26 step12
@@ -4198,11 +4236,13 @@ int modelPrediction(int c0,int bpos,int c4){
             // Paragraph or sentence related updates
             if (linkword && c1==COLON) linkword=0;
             if (c1=='-'&& c2==SPACE) worcxt1.Reset(),sVerb=0;
+            if (c1=='-'&& worcxt.wordcount==1 && worcxt.Type()==Number && colcxt.nlChar!=WIKITABLE) worcxt.Reset(),wt3cxt=0; // v26 step16
 
             if (c1==SPACE) {
                 spaces++;
             }
             else if (c1==LF) {
+                if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
                 if (colcxt.lastfc(1)==FIRSTUPPER) pageParag++; // v26 step12
                 pageSent=pageSent+isParagraph; // v26 step12 (before isParagraph is zeroed below)
                 fc=isParagraph=firstWord=lastWT=0;
@@ -4213,6 +4253,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 words=0xfc;
                 worcxt.Reset();
                 worcxt1.Reset();
+                wt3cxt=0; // v26 step16
                 stream2bR=stream2bR<<2;
                 stream4b=stream4b|0xfff0;
                 if (c2==LF)isNowiki=false;
@@ -4230,12 +4271,17 @@ int modelPrediction(int c0,int bpos,int c4){
                     if (fccxt.cxt!=SQUAREOPEN) wshift=1; // v26 step13: no aging inside [links]
 
                     // We ignore sentance ending dot when we are in [], (), table or line is a list.
-                    if (!(fccxt.cxt==SQUAREOPEN  ||  fccxt.cxt=='(' ||colcxt.nlChar==WIKITABLE || colcxt.lastfc()=='*' )) worcxt.Reset();
+                    if (!(fccxt.cxt==SQUAREOPEN  ||  fccxt.cxt=='(' ||colcxt.nlChar==WIKITABLE || colcxt.lastfc()=='*' )) {
+                        worcxt.Reset();
+                        wt3cxt=0; // v26 step16
+                        if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
+                    }
                     senword=0; // Age words(stream) and reset word context
                 }
                 if ( c1==')' ) senword=0;
             }
             else if (c1==',') {
+                if (wt4cxtW) wt4cxtW1=wt4cxtW,wt4cxtW=0; // v26 step16
                 words=words|0xfc;
                 senword=0;
             }
@@ -4497,6 +4543,7 @@ int modelPrediction(int c0,int bpos,int c4){
         }
 
         h=h+numberA+c1; // v26 step14
+        oldwt1=getWT3(worcxt2.Type(1)); // v26 step16 (consumed by mxA[12] in step 23)
 
         // v26 step11: detect '== See also ==' / '== External links ==' / '== References ==' /
         // '== Bibliography ==' headings by codeword and [category: links by codeword.
@@ -4550,6 +4597,7 @@ int modelPrediction(int c0,int bpos,int c4){
         }
         if (fc==SPACE || brcxt.cxt==LESSTHAN) {
                cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets();
+            cmC2[20].sets(); cmC2[20].sets();cmC2[20].sets(); // v26 step16
         } else {
             // Last sentence word(4) that is not Adjective with last Adjectiv stream word in a line.
             cmC2[5].set(worcxt.Word(4)*53+worcxt1.Word(1)+h+(stream3b & 511));
@@ -4561,6 +4609,10 @@ int modelPrediction(int c0,int bpos,int c4){
             const U32 lastParVerb=worcxt2.LastIf(1,worcxt.Type(1)&Verb);
             if (lastParVerb) cmC2[5].set(lastParVerb*11+word00+c1);
             else cmC2[5].sets();        
+
+            cmC2[20].set(hash(wt3cxt,word0,(stream3b & 63)));             //hash of current sentance word types with current word and last 2 3bit words // v26 step16
+            cmC2[20].set(hash(wt3cxt,worcxt2.Word(1),(stream3b & 511)));  //hash of current sentance word types with last worcxt2 word context and last 3 3bit words // v26 step16
+            cmC2[20].set(hash(wt3cxtW,word0,(stream3b & 63)));            //hash of current sentance word codewords (no Nouns) with current word contex // v26 step16
         }
         // current word and word(1) type upto preffix(not included), paragraph word(1) 
         cmC1[6].set(h+(worcxt.Type(1)&(0x1FF))+worcxt1.Word(1)); 
@@ -4600,7 +4652,7 @@ int modelPrediction(int c0,int bpos,int c4){
         cmC1[2].set((stream2b & 15)+((stream3b & 7) << 6 ));
         cmC1[2].set(c1 | ((col * (c1 == SPACE)) << 8)|((stream2b & 15) << 16));
  
-        if (isCategory) cmC1[2].sets(); else cmC1[2].set(isParagraph?firstWord:(fc<< 11)); // v26 step11 (v26 recipe wt4cxtW1*191+word0 lands in step 16)
+        if (isCategory) cmC1[2].sets(); else cmC1[2].set((wt4cxtW1*191)+word0); // v26 step11+step16
         if (c1==ESCAPE || fc==SPACE || utf8left)  
             cmC1[2].sets();
         else 
@@ -4854,6 +4906,7 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC2[17].mix();
     cmC1[6].mix();
     cmC1[7].mix();
+    cmC2[20].mix(); // v26 step16
     rcmA[0].mix();
 
     AddPrediction(squash(64));  // FP mixer bias
