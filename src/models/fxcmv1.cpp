@@ -3817,7 +3817,7 @@ void PredictorInit() {
     cmC2[1].Init( 16*4096*4096, 1, c_s[1], c_s3[1],&STA6[0][0], c_s4[1],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
     cmC2[2].Init(  8*4096*4096, 1, c_s[2], c_s3[2],&STA6[0][0], c_s4[2],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
     cmC2[3].Init(  8*4096*4096, 1, c_s[3], c_s3[3],&STA6[0][0], c_s4[3],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
-    cmC2[4].Init( 16*4096*4096, 2, c_s[4], c_s3[4],&STA6[0][0], c_s4[4],0xf0,1,&st2_p1[0]); // v26 step21: 8 -> 16*4096*4096
+    cmC2[4].Init(  8*4096*4096, 2, c_s[4], c_s3[4],&STA6[0][0], c_s4[4],0xf0,1,&st2_p1[0]); // RAM trim probe exp032: roll back v26 step21 doubling (-256MiB)
     cmC2[5].Init( 16*4096*4096, 6, c_s[5], c_s3[5],&STA6[0][0], c_s4[5],0xf0,1,&st2_p1[0]); // v26 step21: 8 -> 16*4096*4096
     cmC2[6].Init(      64*4096, 1, c_s[6], c_s3[6],&STA1[0][0], c_s4[6],0x00,1,&st2_p1[0]);
     cmC2[7].Init(  2*4096*4096, 1, c_s[7], c_s3[7],&STA5[0][0], c_s4[7],0xf0,1,&st2_p1[0]);
