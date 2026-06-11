@@ -90,3 +90,7 @@ Next: per-byte scalar dump (pos, word0, wp[word0], indirectWord0Pos, numberA, in
 | 037b-* | 2026-06-11 | exp/037b-sta-all | T0 | text_1M | 70,310–70,313 | **±2 = noise, all 6 of 8 so far** | ~6m each | 7.6 GB | 🟡 flat | STA1/2/4 mdc±1 indistinguishable from sanity at T0 — v26 mdc values sit on a flat optimum (or T0 lacks power); widening STA6/7 grid to mdc±4 in queue2 rewrite |
 
 **Ops lesson (spot eviction):** deallocation wipes /mnt/work entirely (ephemeral disk) — queue scripts, ledger, slices. Recovery = setup.sh + slice relay + queue rewrite; in-flight run lost. Ledger rows must be batch-copied into this file promptly, not left on spot boxes.
+
+| 037b full | 2026-06-11 | exp/037b-sta-all | T0 | text_1M | 70,310–70,313 | **all 8 mdc±1 points flat (±2B)** | ~6m each | 7.6 GB | ❌ null result | STA1/2/4/5 mdc is locally optimal (or T0 powerless here); queue2's STA6/7 mdc±4 grid is the wider test. Null chronicled per convention |
+
+**exp/038 launched (spot3 queue4):** APM-chain scalar export prune — the 7 update-level scalars (pr, pu, pv×2, pt, pz, pr_final) keep feeding fxcm's internal fp-mixers but export neutral 0.5 to cmix behind FXCM_EXPORT_PRUNE=1 (approximates removal without num_models plumbing). Tests kaitz's "one good predictor in fxcm can make compression worse in cmix" against our export-all port choice. Runs: sanity (must = 70,311) + prune at T0 + prune at T1.
