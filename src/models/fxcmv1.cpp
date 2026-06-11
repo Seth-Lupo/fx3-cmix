@@ -359,11 +359,41 @@ int wfgets(char *str, int count, FILE  *fp) {
 }
 char *s;
 char *dictW[44516];
+U8 dictWLen[44516];   // v26 step10: stored word lengths (procWord emits via these)
 int codeword2sym[256]; 
 int dict1size=80;
 int dict2size=32;
 int dict12size=dict1size*dict2size;
 int sizeDict;
+// v26 step10: decoded codewords for wordmodel, captured at dictionary load
+U32 cwTEXT;           // text
+U32 cwNOWIKI;         // nowiki
+U32 cwMATH;           // math
+U32 cwPRE;            // pre
+U32 cwPAGE;           // page image category user wikipedia
+U32 cwIMAGE;
+U32 cwCATEGORY;
+U32 cwUSER;
+U32 cwWIKIPEDIA;
+//
+U32 cwTABLE;
+U32 cwTD;
+//
+U32 cwSEE;
+U32 cwALSO;
+//
+U32 cwEXTERNAL;
+U32 cwLINKS;
+//
+U32 cwREFERENCES;     // References
+U32 cwBIBLIOGRAPHY;   // Bibliography
+
+U32 cwIS;
+U32 cwWITH;
+U32 cwTHE;
+U32 cwON,cwIN;
+U32 cwWWW,cwHTTP;
+U32 cwISBN;
 
 void loaddict(FILE  *file){
     int line_count=0,len=0;
@@ -371,7 +401,40 @@ void loaddict(FILE  *file){
     while ((len=wfgets(s, 8192*8, file)) )  {
         dictW[line_count]=(char *)malloc(len);
         memcpy(dictW[line_count],  s, len);
+        dictWLen[line_count]=U8(len-1); // v26 step10
         //printf("%d,%s\n",len,dictW[line_count]);
+        // v26 step10: capture special codeword indexes
+        if (cwTEXT==0 && strcmp(dictW[line_count], "text")==0) cwTEXT=line_count;
+        else if (cwNOWIKI==0 && strcmp(dictW[line_count], "nowiki")==0) cwNOWIKI=line_count;
+        else if (cwMATH==0 && strcmp(dictW[line_count], "math")==0) cwMATH=line_count;
+        else if (cwPRE==0 && strcmp(dictW[line_count], "pre")==0) cwPRE=line_count;
+        else if (cwPAGE==0 && strcmp(dictW[line_count], "page")==0) cwPAGE=line_count;
+        else if (cwIMAGE==0 && strcmp(dictW[line_count], "image")==0) cwIMAGE=line_count;
+        else if (cwCATEGORY==0 && strcmp(dictW[line_count], "category")==0) cwCATEGORY=line_count;
+        else if (cwUSER==0 && strcmp(dictW[line_count], "user")==0) cwUSER=line_count;
+        else if (cwWIKIPEDIA==0 && strcmp(dictW[line_count], "wikipedia")==0) cwWIKIPEDIA=line_count;
+        else if (cwTABLE==0 && strcmp(dictW[line_count], "table")==0) cwTABLE=line_count;
+        else if (cwTD==0 && strcmp(dictW[line_count], "td")==0) cwTD=line_count;
+        
+        else if (cwEXTERNAL==0 && strcmp(dictW[line_count], "external")==0) cwEXTERNAL=line_count;
+        else if (cwLINKS==0 && strcmp(dictW[line_count], "links")==0) cwLINKS=line_count;
+        else if (cwSEE==0 && strcmp(dictW[line_count], "see")==0) cwSEE=line_count;
+        else if (cwALSO==0 && strcmp(dictW[line_count], "also")==0) cwALSO=line_count;
+        else if (cwREFERENCES==0 && strcmp(dictW[line_count], "references")==0) cwREFERENCES=line_count;
+        else if (cwBIBLIOGRAPHY==0 && strcmp(dictW[line_count], "bibliography")==0) cwBIBLIOGRAPHY=line_count;
+        
+        else if (cwIS==0 && strcmp(dictW[line_count], "is")==0) cwIS=line_count;
+        else if (cwWITH==0 && strcmp(dictW[line_count], "with")==0) cwWITH=line_count;
+        else if (cwTHE==0 && strcmp(dictW[line_count], "the")==0) cwTHE=line_count;
+        
+        else if (cwON==0 && strcmp(dictW[line_count], "on")==0) cwON=line_count;
+        else if (cwIN==0 && strcmp(dictW[line_count], "in")==0) cwIN=line_count;
+        
+        else if (cwWWW==0 && strcmp(dictW[line_count], "www")==0) cwWWW=line_count;
+        else if (cwHTTP==0 && strcmp(dictW[line_count], "http")==0) cwHTTP=line_count;
+        
+        else if (cwISBN==0 && strcmp(dictW[line_count], "isbn")==0) cwISBN=line_count;
+        
         line_count++;
     }
     fclose(file);
@@ -422,16 +485,11 @@ void dosym(){
     }
 }
 
-char *so;     // Our decoded word
 int lastCW=0; // Our decoded word index (max 44515)
+// v26 step10: decode to index only; chars are emitted via dictW/dictWLen in procWord
 void decodeWord(int c){
     if (isDictLoaded==false) return;
-    int j=decodeCodeWord(c);
-    lastCW=j;
-        /*if (j>=sizeDict) {
-            printf("Bad dictionary 1 codepoint\n");
-        }*/
-    so=&(*dictW[j]);
+    lastCW=decodeCodeWord(c);
 }
 
 
@@ -2078,9 +2136,11 @@ struct WordsContext {
     vec<U32,64*4> type;   // List of bytes surrounded by a current word, max 64*4
     vec<U32,64*4> stem;   // List of bytes surrounded by a current word, max 64*4
     vec<U8,64*4> capital; //  max 64*4
+    vec<U32,64*4> codeword;   // v26 step10: codeword index per word
     U32 fword,ftype;      // First word of a sentence
     U8 pbyte;             // Current byte before word
     int wordcount,upper;
+    U32 codesum;          // v26 step10
     int ref;
     void Init() {
         vec_new(&sbytes);
@@ -2092,24 +2152,28 @@ struct WordsContext {
         vec_reset(&type);
         vec_reset(&stem);
         vec_reset(&capital);
+        vec_reset(&codeword); // v26 step10
         fword=pbyte=wordcount=upper=ftype=ref=0;
+        codesum=0;            // v26 step10
     }
     void Set(U8 b,int a=0){
         pbyte=b;upper=a;
     }
-    void  __attribute__ ((noinline)) Update(U32 w,U8 b, U32 t,U32 s) {
+    void  __attribute__ ((noinline)) Update(U32 w,U8 b, U32 t,U32 s,U32 cw=0) { // v26 step10: optional codeword
         if (fword==0) fword=w;
         vec_push(&sbytes,U16(pbyte*256+b));  // Surrounding bytes
         vec_push(&type,t);
         vec_push(&stem,s);
         vec_push(&capital,U8(upper));
+        vec_push(&codeword,cw);  // v26 step10
         pbyte=0;wordcount++;
+        codesum=codesum+cw;      // v26 step10
         if (ftype==0 && t) ftype=t;
     }
     void  __attribute__ ((noinline)) Remove(){
         const int num=vec_size(&stem);
         if (num) {
-            vec_pop(&sbytes),vec_pop(&type),vec_pop(&stem),vec_pop(&capital),wordcount--;
+            vec_pop(&sbytes),vec_pop(&type),vec_pop(&stem),vec_pop(&capital),vec_pop(&codeword),wordcount--; // v26 step10
         }
     }
     U32  __attribute__ ((noinline)) Word(int i=1){
@@ -2131,6 +2195,16 @@ struct WordsContext {
         const int num=vec_size(&capital);
         if (num>=i) return vec_at(&capital,num-(i));
         else return 0;
+    }
+    // v26 step10: codeword accessors (consumers arrive in steps 11/17)
+    U32  __attribute__ ((noinline)) Code(int i=1){
+        const int num=vec_size(&codeword);
+        if (num>=i) return vec_at(&codeword,num-(i));
+        else return 0;
+    }
+    U32  __attribute__ ((noinline)) CodeR(int i,int j=1){
+        int low=min(wordcount,j);
+        return Code(i+(wordcount-low));// i+, is it ok?
     }
     // Return last word matching verb, ... If not found return 0
     U32  __attribute__ ((noinline)) Last(int j=1, U32 t=0){
@@ -3216,8 +3290,7 @@ int dcw=0,dcwl=0; // for decoding dictionary index
 U32 sVerb=0;
 bool lastArt=false; // was last word article 'the'
 bool isNowiki=false; // boundary of xml nowiki  tag
-char *colonstr;
-char sonull=0; // empty string
+U32 cwSTR=0x10000,cwCOLON=0x10000; // v26 step10: last decoded tag / pre-colon codewords
 int deccode=0; // mixer(8)/cmix context for stream2b or decoded word index
 
 bool isText=false; // simulate line break after xml text tag
@@ -3715,12 +3788,12 @@ void setbufstem(char c){
         
         }
         // Sentence, all words.
-        worcxt.Update(word0,c1,(*pWord).Type,whash);
+        worcxt.Update(word0,c1,(*pWord).Type,whash,lastCW); // v26 step10 (v26's extra worIn arg deferred to step 17)
         // Paragraph, most words, exclude Conjunction etc.
         if (((*pWord).Type&(Conjunction+Article+Male+Female+Number+ConjunctiveAdverb))==0  && brcxt.cxt!=LESSTHAN) worcxt1.Update(word0,c1,(*pWord).Type,whash);
         // Stream, words with type, exclude Conjunction etc.
         if (((*pWord).Type&(Conjunction+Article+Male+Female+Adposition+Number+AdverbOfManner+ConjunctiveAdverb))==0  && brcxt.cxt!=LESSTHAN) {
-            if ((*pWord).Type) worcxt2.Update(word0,c1,(*pWord).Type,whash);
+            if ((*pWord).Type) worcxt2.Update(word0,c1,(*pWord).Type,whash,lastCW); // v26 step10
         }
     }
 }
@@ -3740,11 +3813,11 @@ void __attribute__ ((noinline)) procWord() {
         if (dcwl==3)dcw=((dcw/256)/256)+(dcw&0xff00)+(dcw&255)*256*256;
 //        if (dcwl>3 ) printf("ERROR");
         decodeWord(dcw);
+        if (isDictLoaded) cwSTR=lastCW; // v26 step10 (guard keeps tag FSMs dead pre-dictionary, as with the old empty-string compare)
         dcw=dcwl=0;
-        int l = strlen(so);
-        for (int i = 0; i < l; i++) {
-            char ch = so[i];
-            setbuf(ch); 
+        const char *so1=dictW[lastCW];  // v26 step10: emit decoded chars via stored length
+        for (int i=0; i<dictWLen[lastCW]; ++i) {
+            setbuf(so1[i]); 
         }
     }
 }
@@ -3893,6 +3966,7 @@ int modelPrediction(int c0,int bpos,int c4){
             }else {
                 // Set mixer(8) to non-codeword flag (bit 16) and last 8 bit2words
                 deccode=0x10000+(stream2b&0xffff);
+                lastCW=0; // v26 step10
             }
             // Set char to decoded text buffer
             if (c1==10 || c1==9 ||(c1>31 && c1<128)) {
@@ -3968,10 +4042,11 @@ int modelPrediction(int c0,int bpos,int c4){
                     U32 w=worcxt.Word(1);
                     U32 t=worcxt.Type(1);
                     U8 ca=worcxt.Capital(1);
+                    U32 co=worcxt.Code(1); // v26 step10: keep codeword through the merge
                     worcxt.Remove();
                     worcxt.Remove();
                     worcxt.Set(sb>>8,ca);
-                    worcxt.Update(w,c1,t,w);
+                    worcxt.Update(w,c1,t,w,co); // v26 step10
                 }
                 // Reset all bit stream mask after a word
                 stream3bRMask2=stream3bRMask1;
@@ -3988,23 +4063,23 @@ int modelPrediction(int c0,int bpos,int c4){
                 worcxt.Update(w,c1,t,w);
             }
             // Detect text, nowiki, math, pre tag boundaries, (ref tag not used)
-            if (buffer1(6)==charSwap(LESSTHAN) && buffer1(5)== 't'&& isText==false && c1==SPACE  &&strcmp(so, "text")==0) isText=true,so=&sonull;
+            if (buffer1(6)==charSwap(LESSTHAN) && buffer1(5)== 't'&& isText==false && c1==SPACE  &&cwSTR==cwTEXT) isText=true,cwSTR=0x10000; // v26 step10
 
-            if (buffer1(8)==charSwap(LESSTHAN) && isNowiki==false && strcmp(so, "nowiki")==0) isNowiki=true;
-            else if ((buffer1(9)=='/') && (c1==GREATERTHAN ) && isNowiki==true && (strcmp(so, "nowiki")==0)) isNowiki=isPre=false,so=&sonull;
+            if (buffer1(8)==charSwap(LESSTHAN) && isNowiki==false && cwSTR==cwNOWIKI) isNowiki=true; // v26 step10
+            else if ((buffer1(9)=='/') && (c1==GREATERTHAN ) && isNowiki==true && cwSTR==cwNOWIKI) isNowiki=isPre=false,cwSTR=0x10000; // v26 step10
 
             U8 pChar=(worcxt.sBytes()>>8)&0xff;
-            if (isMath && ( (c1==SPACE && colcxt.lastfc()!=COLON)|| c1==',') && c2==GREATERTHAN && strcmp(so, "math")==0)isMath=false,so=&sonull;
-            if (isMath && c1=='/' && c2==LESSTHAN && c3==GREATERTHAN && buffer1(4)=='h')isMath=false,so=&sonull;
+            if (isMath && ( (c1==SPACE && colcxt.lastfc()!=COLON)|| c1==',') && c2==GREATERTHAN && cwSTR==cwMATH)isMath=false,cwSTR=0x10000; // v26 step10
+            if (isMath && c1=='/' && c2==LESSTHAN && c3==GREATERTHAN && buffer1(4)=='h')isMath=false,cwSTR=0x10000; // v26 step10
                 
-            if (isNowiki==false && buffer1(6)==charSwap(LESSTHAN) && buffer1(5)=='m'&& isMath==false && c1!='.' && buffer1(7)!='&'  && buffer1(8)!='&' && strcmp(so, "math")==0) isMath=true;
-            else if ((buffer1(6)=='/') && (c1==GREATERTHAN ||c1=='&') && isMath==true && (strcmp(so, "math")==0)) isMath=false,so=&sonull;
+            if (isNowiki==false && buffer1(6)==charSwap(LESSTHAN) && buffer1(5)=='m'&& isMath==false && c1!='.' && buffer1(7)!='&'  && buffer1(8)!='&' && cwSTR==cwMATH) isMath=true; // v26 step10
+            else if ((buffer1(6)=='/') && (c1==GREATERTHAN ||c1=='&') && isMath==true && cwSTR==cwMATH) isMath=false,cwSTR=0x10000; // v26 step10
 
             pChar=(worcxt.sBytes()>>8)&0xff;
-            if ((buffer1(5)==charSwap(LESSTHAN)) && (c1==GREATERTHAN  ) &&(buffer1(4)=='p'  )&& isPre==false && strcmp(so, "pre")==0) isPre=true,so=&sonull;
-            else if ((buffer1(5)=='/') && (c1==GREATERTHAN) &&(buffer1(4)=='p'  )&& strcmp(so, "pre")==0) isPre=false,so=&sonull;
+            if ((buffer1(5)==charSwap(LESSTHAN)) && (c1==GREATERTHAN  ) &&(buffer1(4)=='p'  )&& isPre==false && cwSTR==cwPRE) isPre=true,cwSTR=0x10000; // v26 step10
+            else if ((buffer1(5)=='/') && (c1==GREATERTHAN) &&(buffer1(4)=='p'  )&& cwSTR==cwPRE) isPre=false,cwSTR=0x10000; // v26 step10
 
-            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& strcmp(so, "page")==0) isPre=isMath=isNowiki=false;
+            if ((buffer1(6)=='/') && (c1==GREATERTHAN) &&(buffer1(5)=='p'  )&& cwSTR==cwPAGE) isPre=isMath=isNowiki=false; // v26 step10 (per-article resets deferred to step 22)
 
             // Update word0 pos
             wp[word0&0xffff]=pos;
@@ -4172,15 +4247,15 @@ int modelPrediction(int c0,int bpos,int c4){
             fccxt.Update(c1);
         }
 
-        if (c1==COLON && (words&2)==2) colonstr=so;// copy word
+        if (c1==COLON && (words&2)==2) cwCOLON=cwSTR;// copy word // v26 step10
         if ((c1==SPACE &&fccxt.cxt==COLON && colcxt.lastfc()!=COLON && colcxt.nlChar!=WIKITABLE ) ) {
                 // Remove if word before colon was not:
-                if (!(strcmp(colonstr, "image")==0 )){
+                if (cwCOLON!=cwIMAGE) { // v26 step10
                     while (fccxt.cxt==COLON) fccxt.Update(LF);
                 }
         }
         // If we have wiki link [category:....] or [wikipedia:...] then remove that word.
-        if (c1==COLON &&(strcmp(colonstr, "category")==0|| strcmp(colonstr, "wikipedia")==0)) fccxt.Update(LF),worcxt.Remove();
+        if (c1==COLON &&(cwCOLON==cwCATEGORY ||cwCOLON==cwUSER ||cwCOLON==cwWIKIPEDIA)) fccxt.Update(LF),worcxt.Remove(); // v26 step10 (v26 adds cwUSER; PState/isCategory and worcxt0.Remove deferred to steps 12/13)
         // Probably math operator, ignore
         if (c1==SPACE && c2==LESSTHAN) fccxt.Update(GREATERTHAN); 
         // Switch from possible category link to http link ( [word:// to [http:// )
@@ -4849,8 +4924,6 @@ inline Predictor::Predictor()  {
     pre2(&STA7[0][0]);
     // Load dictionary
     dosym();
-    so=&sonull;
-    colonstr=so;
     PredictorInit();
 }
 
