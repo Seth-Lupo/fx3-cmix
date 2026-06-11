@@ -1389,13 +1389,18 @@ void PPMD::ByteUpdate() {
   ByteModel::ByteUpdate();
   probs_ /= probs_.sum();
   if (mmap_to_disk && counter_ % 20000 == 0) {
-    int err = munmap(ppmd_model_->HeapStart, mmap_size);
-    if(err != 0) {
+    // ppmd stores absolute pointers into the heap, so the periodic RSS-dropping
+    // remap must land at the same address. MAP_FIXED replaces the old mapping
+    // atomically; dirty pages persist in the shared file's page cache. The old
+    // munmap + mmap(NULL) pair only worked on kernels that happened to reuse
+    // the freed range — Linux 6.x places it elsewhere and every pointer dangles.
+    int fd = open(mmap_path, O_RDWR);
+    if(fd < 0) {
       exit(EXIT_FAILURE);
     }
-    int fd = open(mmap_path, O_RDWR);
-    ppmd_model_->HeapStart = (byte*) mmap(NULL, mmap_size, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
-    if(ppmd_model_->HeapStart == MAP_FAILED) {
+    void* remap = mmap(ppmd_model_->HeapStart, mmap_size, PROT_READ|PROT_WRITE,
+                       MAP_SHARED|MAP_FIXED, fd, 0);
+    if(remap == MAP_FAILED || remap != ppmd_model_->HeapStart) {
       exit(EXIT_FAILURE);
     }
     close(fd);
