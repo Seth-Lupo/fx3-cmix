@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15+30+154+20;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19)
+int num_models = 439+1-2-7-2-4+5+4+15+30+154+20-144;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC4[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19) -144 step20 class swap (CM3 4/3 + CM4 3/2 per slot incl. run, markers gone; +cmC4[8] 2 slots, +cmCR 3 slots)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -204,11 +204,12 @@ struct BlockData {
     int blpos;    // Relative position in block
     int bposshift;
     int c0shift_bpos;
+    int cmBitState; // v26 step20: precomputed getStateByteLocation(bpos,c0)
     
     Inputs<S> mxInputs1; // array of inputs, for two layers
     Inputs<32> mxInputs2;
     void Init(){
-        y=0 ,c0=1, c4=0,bpos=0,blpos=0,bposshift=0,c0shift_bpos=0 ;
+        y=0 ,c0=1, c4=0,bpos=0,blpos=0,bposshift=0,c0shift_bpos=0,cmBitState=0; // v26 step20: +cmBitState
     }
 };
 
@@ -940,419 +941,8 @@ inline U32 getStateByteLocation(const int bpos, const int c0) {
 #define MAXCXT 8
 short st2_p0[4096];
 short st2_p1[4096];
+short rcpr[512]; //2-6 0-4 // v26 step20: global run-prediction table (replaces per-instance c_r/rc1)
 short st2_p2[4096];
-
-struct ContextMap {
-  int C;  // max number of contexts
-  U8* cp[MAXCXT];   // C pointers to current bit history
-  U8* cp0[MAXCXT];  // First element of 7 element array containing cp[i]
-  U32 cxt[MAXCXT];  // C whole byte contexts (hashes)
-  U8* runp[MAXCXT]; // C [0..3] = count, value, unused, unused
-  StateMap *sm;    // C maps of state -> p
-  int cn;          // Next context to set by set()
-  int result;
-  short rc1[512];
-  short st1[4096];
-  short *st2;
-  short st32[256];
-  short st8[256]; 
-  int cms,cms3,cms4;
-  int kep;
-  const U8 *nn;
-  E<7,64> *ptr,*t;  // Full sized BH
-  U32 tmask;
-  int skip2;
-  U16 cxtMask;
-  inline U8  next(int i, int y){
-      return nn[ y + i*4];
-  }
-
-  int __attribute__ ((noinline)) mix() {return mix1(  x.c0,  x.bpos, (U8) x.c4);}
-  inline int pre(const int state) {
-    assert(state>=0 && state<256);
-    U32 n0=next(state, 2)*3+1;
-    U32 n1=next(state, 3)*3+1;
-    return (n1<<12) / (n0+n1);
-  }
-
-// Construct using m bytes of memory for c contexts(c+7)&-8
-void __attribute__ ((noinline)) Init(U32 m, int c, int s3,const U8 *nn1,int cs4,int k,int u, short *st){
-    C=c&255;
-    tmask=((m>>6)-1); 
-    cn=0;
-    cxtMask=((1<C)-1)*2; // Inital zero contexts
-    result=0;
-    kep=k;
-    alloc1(t,(m>>6)+64,ptr,64);  
-    nn=nn1;        
-    int cmul=(c>>8)&255;          // run context mul value
-    cms=(c>>16)&255;              // mix prediction mul value
-    cms4=cs4;
-    cms3=s3;
-    skip2=u;
-    assert(m>=64 && (m&m-1)==0);  // power of 2?
-    assert(sizeof(E<7,64>)==64);
-    alloc(sm,C);
-    for (int i=0; i<C; i++) 
-        sm[i].Init(256,nn1);
-    for (int i=0; i<C; ++i) {
-        cp0[i]=cp[i]=&t[0].bh[0][0];
-        runp[i]=cp[i]+3;
-    }
-    // precalc int c=ilog(rc+1)<<(2+(~rc&1));
-    for (int rc=0;rc<256;rc++) {
-        int c=ilog[rc];
-        c=c<<(2+(~rc&1));
-        if ((rc&1)==0) c=c*cmul/4;
-        rc1[rc+256]=clp(c);
-        rc1[rc]=clp(-c);
-    }
-    st2=st;
-    // precalc mix3 mixer inputs
-    for (int i=0;i<4096;i++) {
-        st1[i]=clp(sc(cms*stretch(i)));
-    } 
-
-    for (int s=0;s<256;s++) {
-        int n0=-!next(s,2);
-        int n1=-!next(s,3);
-        int r=0;
-        int sp0=0;
-        if ((n1-n0)==1 ) sp0=0,r=1;
-        if ((n1-n0)==-1 ) sp0=4095,r=1;
-        if (r) {
-            st8[s] =clp(sc((cms4)*(pre(s)-sp0)));
-            st32[s]=clp(sc((cms3)*stretch(pre(s))));
-            if (s<8) st32[s]=0;
-        }else{
-            st8[s] =0;
-            st32[s]=0;
-        }
-    }
-}
-
-// Set the i'th context to cx
-inline void set(U32 cx) {
-  int i=cn++;
-  assert(i>=0 && i<C);
-  cx=cx*987654323+i;  // permute (don't hash) cx to spread the distribution
-  cx=cx<<16|cx>>16;
-  cxt[i]=cx*123456791+i;
-  cxtMask=cxtMask*2;
-}
-inline void sets() {
-  int i=cn++;
-  assert(i>=0 && i<C);
- cxtMask=cxtMask+1; cxtMask=cxtMask*2;
-  
-}
-
-// Predict to mixer m from bit history state s, using sm to map s to
-// a probability.
-inline int mix3(const int s, StateMap& sm) { 
-  if (s==0){
-    x.mxInputs1.add(0);
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2);prediction_index--;
-    return 0;
-  }else{
-    sm.set(s);
-    const int p1=sm.pr;
-    x.mxInputs1.add(st1[p1]); // From StateMap
-    if (skip2==1)x.mxInputs1.add(st2[p1]);
-    x.mxInputs1.add(st8[s]);  // From state
-    x.mxInputs1.add(st32[s]);
-    x.mxInputs1.add(0);prediction_index--;
-    return 1;
-  }
-}
-
-// Zero prediction
-inline void mix4() {
-    x.mxInputs1.add(0); 
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2);prediction_index--;
-    x.mxInputs1.add(0);
-}
-// Update the model with bit y1, and predict next bit to mixer m.
-// Context: cc=c0, bp=bpos, c1=buf(1), y1=y.
-int mix1(const int cc,const int bp,const int c1) {
-  // Update model with y
-   result=0;
-  for (int i=0; i<cn; ++i) {
-    if ((cxtMask>>(cn-i))&1) {
-        mix4(); // Skip
-    } else {
-    if (cp[i]) {
-      assert(cp[i]>=&t[0].bh[0][0] && cp[i]<=&t[tmask].bh[6][6]);
-      //assert(((long long)(cp[i])&63)>=15);
-      *cp[i]=next(*cp[i], x.y);
-    }
-
-    // Update context pointers
-    int s = 0;
-    if (bp>1 && runp[i][0]==0) {
-     cp[i]=0;
-    } else {
-     U16 chksum=(cxt[i]>>16)^i;
-     
-     if (bp){     
-       if (bp==2 || bp==5)cp0[i]=cp[i]=t[(cxt[i]+cc)&tmask].get(chksum,kep);
-       else cp[i]=cp0[i]+getStateByteLocation(bp,cc);
-    } else {// default
-       cp0[i]=cp[i]=t[(cxt[i]+cc)&tmask].get(chksum,kep);
-       // Update pending bit histories for bits 2-7
-       if (cp0[i][3]==2) {
-         const int c=cp0[i][4]+256;
-         U8 *p=t[(cxt[i]+(c>>6))&tmask].get(chksum,kep);
-         p[0]=1+((c>>5)&1);
-         p[1+((c>>5)&1)]=1+((c>>4)&1);
-         p[3+((c>>4)&3)]=1+((c>>3)&1);
-         p=t[(cxt[i]+(c>>3))&tmask].get(chksum,kep);
-         p[0]=1+((c>>2)&1);
-         p[1+((c>>2)&1)]=1+((c>>1)&1);
-         p[3+((c>>1)&3)]=1+(c&1);
-         cp0[i][6]=0;
-       }
-       // Update run count of previous context
-       if (runp[i][0]==0)  // new context
-         runp[i][0]=2, runp[i][1]=c1;
-       else if (runp[i][1]!=c1)  // different byte in context
-         runp[i][0]=1, runp[i][1]=c1;
-       else if (runp[i][0]<254)  // same byte in context
-         runp[i][0]+=2;
-       runp[i]=cp0[i]+3;
-      }
-     s = *cp[i];
-    }
-    // predict from bit context
-
-    result=result+mix3( s, sm[i]);
-    // predict from last byte in context
-    int b=x.c0shift_bpos ^ (runp[i][1] >> x.bposshift);
-    if (b<=1) {
-       b=b*256;   // predicted bit + for 1, - for 0
-       // count*2, +1 if 2 different bytes seen
-	   x.mxInputs1.add(rc1[runp[i][0]+b]);
-    }
-    else
-      x.mxInputs1.add(0);
-    }
-  }
-  if (bp==7) cn=cxtMask=0;
-  return result;
-}
-};
-
-struct ContextMap1 {
-  int C;  // max number of contexts
-  U8* cp[MAXCXT];   // C pointers to current bit history
-  U8* cp0[MAXCXT];  // First element of 7 element array containing cp[i]
-  U32 cxt[MAXCXT];  // C whole byte contexts (hashes)
-  U8* runp[MAXCXT]; // C [0..3] = count, value, unused, unused
-  StateMap *sm;    // C maps of state -> p
-  int cn;          // Next context to set by set()
-  int result;
-  short rc1[512];
-  short st1[4096];
-  short *st2;
-  short st32[256];
-  short st8[256]; 
-  int cms,cms3,cms4;
-  int kep;
-  const U8 *nn;
-  E<3,32> *ptr,*t;  // Half sized BH
-  U32 tmask;
-  int skip2;
-  U16 cxtMask;
-  inline U8  next(int i, int y){
-      return nn[ y + i*4];
-  }
-
-  inline int pre(const int state) {
-    assert(state>=0 && state<256);
-    U32 n0=next(state, 2)*3+1;
-    U32 n1=next(state, 3)*3+1;
-    return (n1<<12) / (n0+n1);
-  }
-
-// Construct using m bytes of memory for c contexts(c+7)&-8
-void __attribute__ ((noinline)) Init(U32 m, int c, int s3,const U8 *nn1,int cs4,int k,int u,short *st){
-    C=c&255;
-    tmask=((m>>6)-1); 
-    cn=0;
-    cxtMask=((1<C)-1)*2; // Inital zero contexts
-    result=0;
-    kep=k;
-    alloc1(t,(m>>6)+64,ptr,64);  
-    nn=nn1;        
-    int cmul=(c>>8)&255;          // run context mul value
-    cms=(c>>16)&255;              // mix prediction mul value
-    cms4=cs4;
-    cms3=s3;
-    skip2=u;
-    assert(m>=64 && (m&m-1)==0);  // power of 2?
-    assert(sizeof(E<3,32>)==32);
-
-    alloc(sm,C);
-    for (int i=0; i<C; i++) 
-        sm[i].Init(256,nn1);
-    for (int i=0; i<C; ++i) {
-        cp0[i]=cp[i]=&t[0].bh[0][0];
-        runp[i]=cp[i]+3;
-    }
-    // precalc int c=ilog(rc+1)<<(2+(~rc&1));
-    for (int rc=0;rc<256;rc++) {
-        int c=ilog[rc];
-        c=c<<(2+(~rc&1));
-        if ((rc&1)==0) c=c*cmul/4;
-        rc1[rc+256]=clp(c);
-        rc1[rc]=clp(-c);
-    }
-    st2=st;
-    // precalc mix3 mixer inputs
-    for (int i=0;i<4096;i++) {
-        st1[i]=clp(sc(cms*stretch(i)));
-    } 
-
-    for (int s=0;s<256;s++) {
-        int n0=-!next(s,2);
-        int n1=-!next(s,3);
-        int r=0;
-        int sp0=0;
-        if ((n1-n0)==1 ) sp0=0,r=1;
-        if ((n1-n0)==-1 ) sp0=4095,r=1;
-        if (r) {
-            st8[s] =clp(sc((cms4)*(pre(s)-sp0)));
-            st32[s]=clp(sc((cms3)*stretch(pre(s))));
-            if (s<8) st32[s]=0;
-        }else{
-            st8[s] =0;
-            st32[s]=0;
-        }
-    }
-}
-
-// Set the i'th context to cx
-inline void set(U32 cx) {
-  int i=cn++;
-  assert(i>=0 && i<C);
-  cx=cx*987654323+i;  // permute (don't hash) cx to spread the distribution
-  cx=cx<<16|cx>>16;
-  cxt[i]=cx*123456791+i;
-  cxtMask=cxtMask*2;
-}
-
-inline void sets() {
-  int i=cn++;
-  assert(i>=0 && i<C);
- cxtMask=cxtMask+1; cxtMask=cxtMask*2;
-  
-}
-// Predict to mixer m from bit history state s, using sm to map s to
-// a probability.
-inline int mix3(const int s, StateMap& sm) {
-  if (s==0){
-    x.mxInputs1.add(0);
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2);prediction_index--;
-    return 0;
-  }else{
-    sm.set(s);
-    const int p1=sm.pr;
-    x.mxInputs1.add(st1[p1]);
-    if (skip2==1)x.mxInputs1.add(st2[p1]);
-    x.mxInputs1.add(st8[s]);
-    x.mxInputs1.add(st32[s]);
-    x.mxInputs1.add(0);prediction_index--;
-    return 1;
-  }
-}
-// Zero prediction
-inline void mix4() {
-    x.mxInputs1.add(0); 
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2);prediction_index--;
-    x.mxInputs1.add(0);
-}
-// Update the model with bit y1, and predict next bit to mixer m.
-// Context: cc=c0, bp=bpos, c1=buf(1), y1=y.
-int __attribute__ ((noinline))  mix() {
-  // Update model with y
-   result=0;
-  for (int i=0; i<cn; ++i) {
-      if ((cxtMask>>(cn-i))&1)  {
-        mix4();
-    } else {
-    if (cp[i]) {
-      assert(cp[i]>=&t[0].bh[0][0] && cp[i]<=&t[tmask].bh[3][6]);
-      //assert(((long long)(cp[i])&31)>=7);
-      *cp[i]=next(*cp[i], x.y);
-    }
-
-    // Update context pointers
-    int s = 0;
-    if ( x.bpos>1 && runp[i][0]==0) {
-     cp[i]=0;
-    } else {
-     U16 chksum=(cxt[i]>>16)^i;
-     
-     if ( x.bpos){     
-       if ( x.bpos==2 ||  x.bpos==5)cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
-       else cp[i]=cp0[i]+getStateByteLocation( x.bpos,x.c0);
-    } else {// default
-       cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
-       // Update pending bit histories for bits 2-7
-       if (cp0[i][3]==2) {
-         const int c=cp0[i][4]+256;
-         U8 *p=t[(cxt[i]+(c>>6))&tmask].get(chksum,kep);
-         p[0]=1+((c>>5)&1);
-         p[1+((c>>5)&1)]=1+((c>>4)&1);
-         p[3+((c>>4)&3)]=1+((c>>3)&1);
-         p=t[(cxt[i]+(c>>3))&tmask].get(chksum,kep);
-         p[0]=1+((c>>2)&1);
-         p[1+((c>>2)&1)]=1+((c>>1)&1);
-         p[3+((c>>1)&3)]=1+(c&1);
-         cp0[i][6]=0;
-       }
-       const U8 c1=x.c4;
-       // Update run count of previous context
-       if (runp[i][0]==0)  // new context
-         runp[i][0]=2, runp[i][1]=c1;
-       else if (runp[i][1]!=c1)  // different byte in context
-         runp[i][0]=1, runp[i][1]=c1;
-       else if (runp[i][0]<254)  // same byte in context
-         runp[i][0]+=2;
-       runp[i]=cp0[i]+3;
-      }
-     s = *cp[i];
-    }
-    // predict from bit context
-
-    result=result+mix3(s, sm[i]);
-    // predict from last byte in context
-    int b=x.c0shift_bpos ^ (runp[i][1] >> x.bposshift);
-    if (b<=1) {
-       b=b*256;   // predicted bit + for 1, - for 0
-       // count*2, +1 if 2 different bytes seen
-	   x.mxInputs1.add(rc1[runp[i][0]+b]);
-    }
-    else
-      x.mxInputs1.add(0);
-   }
-  }
-  if ( x.bpos==7) cn=cxtMask=0;
-  return result;
-}
-};
 
 template <const int A, const int B> // Warning: values 3, 7 for A are the only valid parameters
 union  E1 {  // hash element, 64 bytes
@@ -1381,212 +971,441 @@ union  E1 {  // hash element, 64 bytes
     
 };
 
-struct ContextMap2 {
-  int C;  // max number of contexts
-  U8* cp[MAXCXT];   // C pointers to current bit history
-  U8* cp0[MAXCXT];  // First element of 7 element array containing cp[i]
-  U32 cxt[MAXCXT];  // C whole byte contexts (hashes)
-  U8* runp[MAXCXT]; // C [0..3] = count, value, unused, unused
-  StateMap *sm;    // C maps of state -> p
-  int cn;          // Next context to set by set()
-  int result;
-  short rc1[512];
-  short st1[4096];
-  short *st2;
-  short st32[256];
-  short st8[256]; 
-  int cms,cms3,cms4;
-  int kep;
-  const U8 *nn;
-  E1<14,128> *ptr,*t;  // Double sized BH
-  U32 tmask;
-  int skip2;
-  U16 cxtMask;
-  inline U8  next(int i, int y){
-      return nn[ y + i*4];
-  }
-
-  inline int pre(const int state) {
-    assert(state>=0 && state<256);
-    U32 n0=next(state, 2)*3+1;
-    U32 n1=next(state, 3)*3+1;
-    return (n1<<12) / (n0+n1);
-  }
-
-// Construct using m bytes of memory for c contexts(c+7)&-8
-void __attribute__ ((noinline)) Init(U32 m1, int c, int s3,const U8 *nn1,int cs4,int k,int u,short *st){
-    C=c&255;
-    int m=m1*2;
-    tmask=((m>>7)-1); 
-    cn=0;
-    cxtMask=((1<C)-1)*2; // Inital zero contexts
-    result=0;
-    kep=k;
-    alloc1(t,(m>>7)+64*2,ptr,128);  
-    nn=nn1;        
-    int cmul=(c>>8)&255;          // run context mul value
-    cms=(c>>16)&255;              // mix prediction mul value
-    cms4=cs4;
-    cms3=s3;
-    skip2=u;
-    assert(m>=64 && (m&m-1)==0);  // power of 2?
-    assert(sizeof(E<3,32>)==32);
-
-    alloc(sm,C);
-    for (int i=0; i<C; i++) 
-        sm[i].Init(256,nn1);
-    for (int i=0; i<C; ++i) {
-        cp0[i]=cp[i]=&t[0].bh[0][0];
-        runp[i]=cp[i]+3;
+// v26 step20: ContextMap3 (14-way, shared per-instance StateMap with cross-slot dedup,
+// st8 merged into st32, marker input removed, global rcpr run scaling) and ContextMap4
+// (3-way, precalc st9 + merged st32, no live StateMap). Verbatim from standalone fxcm v26
+// incl. the FIXED reset() functions (memset from aligned base t, (tmask+1) buckets).
+struct ContextMap3 {
+    int C;  // max number of contexts
+    U8* cp[MAXCXT];   // C pointers to current bit history
+    U8* cp0[MAXCXT];  // First element of 7 element array containing cp[i]
+    U32 cxt[MAXCXT];  // C whole byte contexts (hashes)
+    U8* runp[MAXCXT]; // C [0..3] = count, value, unused, unused
+    int cn;          // Next context to set by set()
+    int result;
+    short st1[4096];
+    short *st2;
+    short st32[256];
+    int cms,cms3,cms4;
+    int kep;
+    const U8 *nn;
+    E1<14,128> *ptr,*t;  // Double sized BH
+    U32 tmask;
+    int skip2;
+    int skip3;
+    U16 cxtMask;
+    //state
+    int cxtn[MAXCXT];    // Context of last prediction
+    U32 *ts;             // cxt -> prediction in high 22 bits, count in low 10 bits
+    int sti;
+    inline U8  next(int i, int y) {
+        return nn[ y + i*4];
     }
-    // precalc int c=ilog(rc+1)<<(2+(~rc&1));
-    for (int rc=0;rc<256;rc++) {
-        int c=ilog[rc];
-        c=c<<(2+(~rc&1));
-        if ((rc&1)==0) c=c*cmul/4;
-        rc1[rc+256]=clp(c);
-        rc1[rc]=clp(-c);
+
+    inline int pre(const int state) {
+        assert(state>=0 && state<256);
+        U32 n0=next(state, 2)*3+1;
+        U32 n1=next(state, 3)*3+1;
+        return (n1<<12) / (n0+n1);
     }
-    st2=st;
-    // precalc mix3 mixer inputs
-    for (int i=0;i<4096;i++) {
-        st1[i]=clp(sc(cms*stretch(i)));
+    inline void update(const int i) {    
+        U32 *p=&ts[cxtn[i]], p0=p[0];
+        const int pr1=p0>>14;
+        p[0]+=(x.y<<18)-pr1;
+    }
+    int set(const int c,int i) {  
+        assert(c>=0 && c<256);
+        const int  pr=ts[c]>>20; // predict from current state
+        // look if new state is same as state before, if so skip this state
+        // if first state, set it
+        if (i==0) {
+            cxtn[sti++]=c;
+            return pr;
+        }
+        for (int j=0; j<sti; j++) {
+            if (cxtn[j]==c) return pr; // skip if same
+        }
+        cxtn[sti++]=c;
+        return pr;
     } 
+    void upd() {
+        for (int j=0; j<sti; j++) {
+            update(j);
+        }
+    } 
+    // Construct using m bytes of memory for c contexts(c+7)&-8
+    void __attribute__ ((noinline)) Init(U32 m1, int c1, int s2, int s3,const U8 *nn1,int cs4,int k, const int u,short *st) {
+        C=c1;
+        int m=m1*2;
+        tmask=((m>>7)-1); 
+        cn=result=0;
+        cxtMask=((1<C)-1)*2; // Inital zero contexts
+        kep=k;
+        alloc1(t,(m>>7)+64*2,ptr,128);  
+        nn=nn1;        
+        cms=s2;               // mix prediction mul value
+        cms4=cs4;
+        cms3=s3;
+        skip2=u;
+        assert(m>=64 && (m&m-1)==0);  // power of 2?
+        assert(sizeof(E1<14,128>)==128);
+        //state
+        alloc(ts,256);
+        for (int i=0; i<256; ++i){
+            U32 n0=next(i, 2)*3+1;
+            U32 n1=next(i, 3)*3+1;
+            ts[i]=(((n1<<20) / (n0+n1)) << 12);
+        }
+        //cm
+        for (int i=0; i<C; ++i) {
+            cp0[i]=cp[i]=&t[0].bh[0][0];
+            runp[i]=cp[i]+3;
+        }
 
-    for (int s=0;s<256;s++) {
-        int n0=-!next(s,2);
-        int n1=-!next(s,3);
-        int r=0;
-        int sp0=0;
-        if ((n1-n0)==1 ) sp0=0,r=1;
-        if ((n1-n0)==-1 ) sp0=4095,r=1;
-        if (r) {
-            st8[s] =clp(sc((cms4)*(pre(s)-sp0)));
-            st32[s]=clp(sc((cms3)*stretch(pre(s))));
-            if (s<8) st32[s]=0;
-        }else{
-            st8[s] =0;
-            st32[s]=0;
+        st2=st;
+        // precalc mix3 mixer inputs
+        for (int i=0;i<4096;i++) {
+            st1[i]=clp(sc(cms*stretch(i)));
+        } 
+
+        for (int s=0;s<256;s++) {
+            int n0=-!next(s,2);
+            int n1=-!next(s,3);
+            int r=0;
+            int sp0=0;
+            if ((n1-n0)==1 ) sp0=0,r=1;
+            if ((n1-n0)==-1 ) sp0=4095,r=1;
+            if (r) {
+                int st8 =clp(sc((cms4)*(pre(s)-sp0)));
+                st32[s]=clp(sc((cms3)*stretch(pre(s))));
+                if (s<8) st32[s]=st8;
+                else st32[s]=(st8+st32[s])>>1;
+            }else{
+                st32[s]=0;
+            }
         }
     }
-}
-
-// Set the i'th context to cx
-inline void set(U32 cx) {
-  int i=cn++;
-  assert(i>=0 && i<C);
-  cx=cx*987654323+i;  // permute (don't hash) cx to spread the distribution
-  cx=cx<<16|cx>>16;
-  cxt[i]=cx*123456791+i;
-  cxtMask=cxtMask*2;
-}
-
-inline void sets() {
-  int i=cn++;
-  assert(i>=0 && i<C);
- cxtMask=cxtMask+1; cxtMask=cxtMask*2;
-  
-}
-// Predict to mixer m from bit history state s, using sm to map s to
-// a probability.
-inline int mix3(const int s, StateMap& sm) {
-  if (s==0){
-    x.mxInputs1.add(0);
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2);    prediction_index--;
-    return 0;
-  }else{
-    sm.set(s);
-    const int p1=sm.pr;
-    x.mxInputs1.add(st1[p1]);
-    if (skip2==1)x.mxInputs1.add(st2[p1]);
-    x.mxInputs1.add(st8[s]);
-    x.mxInputs1.add(st32[s]); 
-    x.mxInputs1.add(0);    prediction_index--;
-    return 1;
-  }
-}
-// Zero prediction
-inline void mix4() {
-    x.mxInputs1.add(0); 
-    if (skip2==1)x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(0);
-    x.mxInputs1.add(32*2); prediction_index--;
-    x.mxInputs1.add(0);
-}
-// Update the model with bit y1, and predict next bit to mixer m.
-// Context: cc=c0, bp=bpos, c1=buf(1), y1=y.
-int __attribute__ ((noinline))  mix() {
-  // Update model with y
-   result=0;
-  for (int i=0; i<cn; ++i) {
-      if ((cxtMask>>(cn-i))&1)  {
-        mix4();
-    } else {
-    if (cp[i]) {
-      assert(cp[i]>=&t[0].bh[0][0] && cp[i]<=&t[tmask].bh[14][6]);
-      assert(((long long)(cp[i])&127)>=29);
-      *cp[i]=next(*cp[i], x.y);
+    void reset() {
+        // Same alignment bug as ContextMap4::reset — see comment there.
+        memset((void*)t, 0, (tmask+1)*sizeof(E1<14,128>));
+        for (int i=0; i<C; ++i) {
+            cp0[i]=cp[i]=&t[0].bh[0][0];
+            runp[i]=cp[i]+3;
+        }
+        cxtMask=((1<C)-1)*2;
+    }
+    void Free() {
+        free(ts);
+        free(ptr);
     }
 
-    // Update context pointers
-    int s = 0;
-    if ( x.bpos>1 && runp[i][0]==0) {
-     cp[i]=0;
-    } else {
-     U16 chksum=(cxt[i]>>16)^i;
-     
-     if ( x.bpos){     
-       if ( x.bpos==2 ||  x.bpos==5)cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
-       else cp[i]=cp0[i]+getStateByteLocation( x.bpos,x.c0);
-    } else {// default
-       cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
-       // Update pending bit histories for bits 2-7
-       if (cp0[i][3]==2) {
-         const int c=cp0[i][4]+256;
-         U8 *p=t[(cxt[i]+(c>>6))&tmask].get(chksum,kep);
-         p[0]=1+((c>>5)&1);
-         p[1+((c>>5)&1)]=1+((c>>4)&1);
-         p[3+((c>>4)&3)]=1+((c>>3)&1);
-         p=t[(cxt[i]+(c>>3))&tmask].get(chksum,kep);
-         p[0]=1+((c>>2)&1);
-         p[1+((c>>2)&1)]=1+((c>>1)&1);
-         p[3+((c>>1)&3)]=1+(c&1);
-         cp0[i][6]=0;
-       }
-       const U8 c1=x.c4;
-       // Update run count of previous context
-       if (runp[i][0]==0)  // new context
-         runp[i][0]=2, runp[i][1]=c1;
-       else if (runp[i][1]!=c1)  // different byte in context
-         runp[i][0]=1, runp[i][1]=c1;
-       else if (runp[i][0]<254)  // same byte in context
-         runp[i][0]+=2;
-       runp[i]=cp0[i]+3;
-      }
-     s = *cp[i];
+    // Set the i'th context to cx
+    inline void set(U32 cx) {
+        int i=cn++;
+        assert(i>=0 && i<C);
+        cx=cx*987654323+i;  // permute (don't hash) cx to spread the distribution
+        cx=cx<<16|cx>>16;
+        cxt[i]=cx*123456791+i;
+        cxtMask=cxtMask*2;
     }
-    // predict from bit context
 
-    result=result+mix3(s, sm[i]);
-    // predict from last byte in context
-    int b=x.c0shift_bpos ^ (runp[i][1] >> x.bposshift);
-    if (b<=1) {
-       b=b*256;   // predicted bit + for 1, - for 0
-       // count*2, +1 if 2 different bytes seen
-	   x.mxInputs1.add(rc1[runp[i][0]+b]);
+    inline void sets() {
+        int i=cn++;
+        assert(i>=0 && i<C);
+        cxtMask=cxtMask+1; cxtMask=cxtMask*2;
     }
-    else
-      x.mxInputs1.add(0);
-   }
-  }
-  if ( x.bpos==7) cn=cxtMask=0;
-  return result;
-}
+    // Predict to mixer m from bit history state s, using sm to map s to
+    // a probability.
+    inline int mix3(const int s, int i) {
+        if (s==0) {
+            x.mxInputs1.add(0);
+            if (skip2==1)x.mxInputs1.add(0);
+            x.mxInputs1.add(0);
+            return 0;
+        } else {
+            const int p1=set(s,i);
+            x.mxInputs1.add(st1[p1]);
+            if (skip2==1)x.mxInputs1.add(st2[p1]);
+            x.mxInputs1.add(st32[s]);
+            return 1;
+        }
+    }
+    // Zero prediction
+    inline void mix4() {
+        x.mxInputs1.add(0);
+        if (skip2==1) x.mxInputs1.add(0);
+        x.mxInputs1.add(0);
+        x.mxInputs1.add(0);
+    }
+    // Update the model with bit y1, and predict next bit to mixer m.
+    int __attribute__ ((noinline)) mix() {
+        // Update model with y
+        result=0;
+        upd(); // update statemap
+        sti=0;
+        for (int i=0; i<cn; ++i) {
+            if ((cxtMask>>(cn-i))&1) {
+                mix4();
+            } else {
+                if (cp[i]) {
+                    assert(cp[i]>=&t[0].bh[0][0] && cp[i]<=&t[tmask].bh[14][6]);
+                    assert(((long long)(cp[i])&127)>=29);
+                    *cp[i]=next(*cp[i], x.y);
+                }
+
+                // Update context pointers
+                int s=0;
+                if (x.bpos>1 && runp[i][0]==0) {
+                    cp[i]=0;
+                } else {
+                    const U16 chksum=(cxt[i]>>16)^i;
+                    if ( x.bpos){     
+                        if ( x.bpos==2 ||  x.bpos==5)cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
+                        else cp[i]=cp0[i]+x.cmBitState;
+                    } else {// default
+                        cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
+                        // Update pending bit histories for bits 2-7
+                        if (cp0[i][3]==2) {
+                            const int c=cp0[i][4]+256;
+                            U8 *p=t[(cxt[i]+(c>>6))&tmask].get(chksum,kep);
+                            p[0]=1+((c>>5)&1);
+                            p[1+((c>>5)&1)]=1+((c>>4)&1);
+                            p[3+((c>>4)&3)]=1+((c>>3)&1);
+                            p=t[(cxt[i]+(c>>3))&tmask].get(chksum,kep);
+                            p[0]=1+((c>>2)&1);
+                            p[1+((c>>2)&1)]=1+((c>>1)&1);
+                            p[3+((c>>1)&3)]=1+(c&1);
+                            cp0[i][6]=0;
+                        }
+                        const U8 c1=x.c4;
+                        // Update run count of previous context
+                        if (runp[i][0]==0)  // new context
+                        runp[i][0]=2, runp[i][1]=c1;
+                        else if (runp[i][1]!=c1)  // different byte in context
+                        runp[i][0]=1, runp[i][1]=c1;
+                        else if (runp[i][0]<254)  // same byte in context
+                        runp[i][0]+=2;
+                        runp[i]=cp0[i]+3;
+                    }
+                    s = *cp[i];
+                }
+                // predict from bit context
+                result=result+mix3(s, i);
+                // predict from last byte in context
+                int b=x.c0shift_bpos ^ (runp[i][1] >> x.bposshift);
+                
+                if (b<=1) {
+                    b=b*256;   // predicted bit + for 1, - for 0
+                    // count*2, +1 if 2 different bytes seen
+                    x.mxInputs1.add(rcpr[runp[i][0]+b]);
+                }
+                else
+                x.mxInputs1.add(0);
+            }
+        }
+        if ( x.bpos==7) {
+            assert(cn==0 || cn==C),cn=cxtMask=0;
+        }
+        return result;
+    }
 };
+
+struct ContextMap4 {
+    int C;  // max number of contexts
+    U8* cp[MAXCXT];   // C pointers to current bit history
+    U8* cp0[MAXCXT];  // First element of 7 element array containing cp[i]
+    U32 cxt[MAXCXT];  // C whole byte contexts (hashes)
+    U8* runp[MAXCXT]; // C [0..3] = count, value, unused, unused
+    int cn;          // Next context to set by set()
+    int result;
+    short st32[256];
+    short st9[256];
+    int cms,cms3,cms4;
+    int kep;
+    const U8 *nn;
+    E<3,32> *ptr,*t;  // Half sized BH
+    U32 tmask;
+    int skip2;
+    U16 cxtMask;
+
+    inline U8  next(int i, int y) {
+        return nn[ y + i*4];
+    }
+    inline int pre(const int state) {
+        assert(state>=0 && state<256);
+        U32 n0=next(state, 2)*3+1;
+        U32 n1=next(state, 3)*3+1;
+        return (n1<<12) / (n0+n1);
+    }
+
+    // Construct using m bytes of memory for c contexts(c+7)&-8
+    void __attribute__ ((noinline)) Init(U32 m, int c1, int s2, int s3,const U8 *nn1,int cs4,int k, const int u) {
+        C=c1;
+        tmask=((m>>6)-1); 
+        cn=0;
+        cxtMask=((1<C)-1)*2; // Inital zero contexts
+        result=0;
+        kep=k;
+        alloc1(t,(m>>6)+64,ptr,64);  
+        nn=nn1;        
+        cms=s2;               // mix prediction mul value
+        cms4=cs4;
+        cms3=s3;
+        skip2=u;
+        assert(m>=64 && (m&m-1)==0);  // power of 2?
+        assert(sizeof(E<3,32>)==32);
+
+        for (int i=0; i<C; ++i) {
+            cp0[i]=cp[i]=&t[0].bh[0][0];
+            runp[i]=cp[i]+3;
+        }
+
+        // precalc mix3 mixer inputs
+        for (int i=0;i<256;i++) {
+            st9[i]=clp(sc(18*(pre(i) - 2048)));
+        } 
+
+        for (int s=0;s<256;s++) {
+            int n0=-!next(s,2);
+            int n1=-!next(s,3);
+            int r=0;
+            int sp0=0;
+            if ((n1-n0)==1 ) sp0=0,r=1;
+            if ((n1-n0)==-1 ) sp0=4095,r=1;
+            if (r) {
+                int st8 =clp(sc((cms4)*(pre(s)-sp0)));
+                st32[s]=clp(sc((cms3)*stretch(pre(s))));
+                if (s<8) st32[s]=st8;
+                else st32[s]=(st8+st32[s])>>1;
+            } else {
+                st32[s]=0;
+            }
+        }
+    }
+    void reset() {
+        // Zero the table via the ALIGNED base t, full used range (tmask+1 buckets).
+        // Was memset(ptr, 0, tmask*32): ptr is the raw calloc pointer, so the
+        // cleared window shifted by (t-ptr) — an allocator-alignment accident that
+        // differs between encoder and decoder processes, leaving stale states in
+        // the table tail in one of them. This was the fx3 nondeterminism bug.
+        memset((void*)t, 0, (tmask+1)*sizeof(E<3,32>));
+        for (int i=0; i<C; ++i) {
+            cp0[i]=cp[i]=&t[0].bh[0][0];
+            runp[i]=cp[i]+3;
+        }
+        cxtMask=((1<C)-1)*2;
+    }
+    void Free() {
+        free(ptr);
+    }
+
+    // Set the i'th context to cx
+    inline void set(U32 cx) {
+        int i=cn++;
+        assert(i>=0 && i<C);
+        cx=cx*987654323+i;  // permute (don't hash) cx to spread the distribution
+        cx=cx<<16|cx>>16;
+        cxt[i]=cx*123456791+i;
+        cxtMask=cxtMask*2;
+    }
+
+    inline void sets() {
+        int i=cn++;
+        assert(i>=0 && i<C);
+        cxtMask=cxtMask+1; cxtMask=cxtMask*2;
+    }
+    // Predict to mixer m from bit history state s, using sm to map s to
+    // a probability.
+    inline int mix3(const int s) {
+        if (s==0){
+            if (skip2==1) x.mxInputs1.add(0);
+            x.mxInputs1.add(0);
+            return 0;
+        } else {
+            if (skip2==1) x.mxInputs1.add(st9[s]);
+            x.mxInputs1.add(st32[s]);
+            return 1;
+        }
+    }
+
+    // Zero prediction
+    inline void mix4() {
+        if (skip2==1) x.mxInputs1.add(0);
+        x.mxInputs1.add(0);
+        x.mxInputs1.add(0);
+    }
+    // Update the model with bit y1, and predict next bit to mixer m.
+    int __attribute__ ((noinline)) mix() {
+        // Update model with y
+        result=0;
+        for (int i=0; i<cn; ++i) {
+            if ((cxtMask>>(cn-i))&1) {
+                mix4();
+            } else {
+                if (cp[i]) {
+                    assert(cp[i]>=&t[0].bh[0][0] && cp[i]<=&t[tmask].bh[3][6]);
+                    assert(((long long)(cp[i])&31)>=7);
+                    *cp[i]=next(*cp[i], x.y);
+                }
+
+                // Update context pointers
+                int s = 0;
+                if ( x.bpos>1 && runp[i][0]==0) {
+                    cp[i]=0;
+                } else {
+                    const U16 chksum=(cxt[i]>>16)^i;
+                    if ( x.bpos){     
+                        if ( x.bpos==2 ||  x.bpos==5)cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
+                        else cp[i]=cp0[i]+x.cmBitState;
+                    } else {// default
+                        cp0[i]=cp[i]=t[(cxt[i]+x.c0)&tmask].get(chksum,kep);
+                        // Update pending bit histories for bits 2-7
+                        if (cp0[i][3]==2) {
+                            const int c=cp0[i][4]+256;
+                            U8 *p=t[(cxt[i]+(c>>6))&tmask].get(chksum,kep);
+                            p[0]=1+((c>>5)&1);
+                            p[1+((c>>5)&1)]=1+((c>>4)&1);
+                            p[3+((c>>4)&3)]=1+((c>>3)&1);
+                            p=t[(cxt[i]+(c>>3))&tmask].get(chksum,kep);
+                            p[0]=1+((c>>2)&1);
+                            p[1+((c>>2)&1)]=1+((c>>1)&1);
+                            p[3+((c>>1)&3)]=1+(c&1);
+                            cp0[i][6]=0;
+                        }
+                        const U8 c1=x.c4;
+                        // Update run count of previous context
+                        if (runp[i][0]==0)  // new context
+                        runp[i][0]=2, runp[i][1]=c1;
+                        else if (runp[i][1]!=c1)  // different byte in context
+                        runp[i][0]=1, runp[i][1]=c1;
+                        else if (runp[i][0]<254)  // same byte in context
+                        runp[i][0]+=2;
+                        runp[i]=cp0[i]+3;
+                    }
+                    s = *cp[i];
+                }
+                // predict from bit context
+                result=result+mix3(s);
+                
+                // predict from last byte in context
+                int b=x.c0shift_bpos ^ (runp[i][1] >> x.bposshift);
+                if (b<=1) {
+                    b=b*256;   // predicted bit + for 1, - for 0
+                    // count*2, +1 if 2 different bytes seen
+                    x.mxInputs1.add(rcpr[runp[i][0]+b]);
+                }
+                else
+                x.mxInputs1.add(0);
+            }
+        }
+        if ( x.bpos==7) {
+            assert(cn==0 || cn==C);
+            cn=cxtMask=0;
+        }
+        return result;
+    }
+};
+
 
 // APM maps a probability and a context into a new probability
 // that bit y will next be 1.  After each guess it updates
@@ -3662,10 +3481,10 @@ const U32 tri[4]={0,4,3,7}, trj[4]={0,6,6,12};
 
 // Parameters
 
-const U32 c_r[27]= { 3,  4,  6,  4,  6,  6,  2,  3,  3,  3,  6,  4,  3,  4,  5,  6,  2,  6,  4,  4,  4,  4,  4,  4,  4,  4,  4};  // contextmap run mul
-const U32 c_s[27]= {28, 26, 28, 31, 34, 31, 33, 33, 35, 35, 29, 32, 33, 34, 30, 36, 31, 32, 32, 32, 32, 32, 33, 32, 32, 32, 32};  // contextmap pr mul
-const U32 c_s3[27]={43, 33, 34, 28, 34, 29, 32, 33, 37, 35, 33, 28, 31, 35, 28, 30, 33, 34, 32, 32, 32, 32, 32, 32, 32, 32, 32};
-const U32 c_s4[27]={ 9,  8,  9,  5,  8, 12, 15,  8,  8, 12, 10,  7,  7,  8, 8, 13, 13, 14,  8,  8, 12, 12, 12, 12, 12, 12, 12};
+// v26 step20: per-instance c_r run multipliers deleted (global rcpr table instead)
+const U32 c_s[27]= {28, 32, 32, 32, 34, 31, 33, 33, 35, 35, 29, 32, 33, 34, 30, 36, 31, 32, 32, 32, 32, 32, 33, 32, 32, 32, 32};  // contextmap pr mul // v26 step20: [1..3] 26,28,31 -> 32,32,32
+const U32 c_s3[27]={43, 32, 32, 32, 34, 29, 32, 33, 37, 35, 33, 28, 31, 35, 28, 30, 33, 34, 32, 32, 32, 32, 32, 32, 32, 32, 32}; // v26 step20: [1..3] 33,34,28 -> 32,32,32
+const U32 c_s4[27]={ 9,  8, 12, 12,  8, 12, 15,  8,  8, 12, 10,  7,  7,  8, 8, 13, 13, 14,  8,  8, 12, 12, 12, 12, 12, 12, 12}; // v26 step20: [2..3] 9,5 -> 12,12
 
 const int e_l[8]={1830, 1997, 1973, 1851, 1897, 1690, 1998, 1842};
 
@@ -3755,16 +3574,17 @@ Mixer1 mxA[12];
 // Predictors are:
 // medium state memory, per context max 7 uniqe contexts state sets
 // for average sized contexts
-ContextMap cmC[6]; 
+ContextMap3 cmC[6]; // v26 step20: 14-way class (was 7-way ContextMap; same Init arg = 2x bytes)
 // small state memory, per context max 3 uniqe contexts state sets
 // for large amount of small contexts
-ContextMap1 cmC1[8];
+ContextMap4 cmC4[9]; // v26 step20: was "ContextMap1 cmC1[8]"; +[8] new; [5] dead slot kept for parity
+ContextMap4 cmCR[9]; // v26 step20: [0..2] live; [3..8] declared-never-inited in v26 too
 // large state memory, per context max 14 uniqe contexts state sets
 // for large amount of large contexts
-ContextMap2 cmC2[21]; // v26 step16: +[20]; [18]/[19] land in step 17
-ContextMap2 cmcr[1+8]; // v26 step18 (ContextMap3 in v26; class migrates in step 20)
-ContextMap2 cmcr2[4];  // v26 step18
-ContextMap2 cmC44;     // v26 step19 (ContextMap3 in v26; class migrates in step 20)
+ContextMap3 cmC2[21]; // v26 step16: +[20]; [18]/[19] land in step 17; class migrated step 20
+ContextMap3 cmcr[1+8]; // v26 step18
+ContextMap3 cmcr2[4];  // v26 step18
+ContextMap3 cmC44;     // v26 step19
 StationaryMap maps1; // v26 step15
 StationaryMap maps2; // v26 step15
 APM<256>  apmA0;
@@ -3839,7 +3659,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36+192+24)&-16; // v26 step15: +4; step16: +18; step17: +36; step18: +192; step19: +24 cmC44 (4*6) -> N=784 (S=800)
+    x.mxInputs1.ncount=(474+19+3)&-16; // v26 step20: 474 CM adds (CM3 4/3, CM4 3/2 per slot) + 19 non-CM adds (match 7, scm 6, maps 4, rcm 1, lstm 1) -> N=496 (S=800 headroom kept for step 23)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -3850,55 +3670,66 @@ void PredictorInit() {
     mxA[10].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
     mxA[11].setTxWx(x.mxInputs2.ncount,&x.mxInputs2.n[0]);
 
-    cmC2[0].Init( 8*4096*4096,3|(c_r[0]<<8)|(c_s[0]<<16),c_s3[0],&STA6[0][0],c_s4[0],0xf0,1,&st2_p1[0]);
-    cmC2[1].Init(16*4096*4096,1|(c_r[1]<<8)|(c_s[1]<<16),c_s3[1],&STA6[0][0],c_s4[1],0xf0,1,&st2_p1[0]);
-    cmC2[2].Init( 8*4096*4096,1|(c_r[2]<<8)|(c_s[2]<<16),c_s3[2],&STA6[0][0],c_s4[2],0xf0,1,&st2_p1[0]);
-    cmC2[3].Init( 8*4096*4096,1|(c_r[3]<<8)|(c_s[3]<<16),c_s3[3],&STA6[0][0],c_s4[3],0xf0,1,&st2_p1[0]);
-    cmC2[4].Init( 8*4096*4096,2|(c_r[4]<<8)|(c_s[4]<<16),c_s3[4],&STA6[0][0],c_s4[4],0xf0,1,&st2_p1[0]);
-    cmC2[5].Init( 8*4096*4096,6|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]);
-    cmC2[6].Init( 1*4096*4096/64,1|(c_r[6]<<8)|(c_s[6]<<16),c_s3[6],&STA1[0][0],c_s4[6],0,1,&st2_p1[0]);
-    cmC2[7].Init( 2*4096*4096,1|(c_r[7]<<8)|(c_s[7]<<16),c_s3[7],&STA5[0][0],c_s4[7],0xf0,1,&st2_p1[0]);
-    cmC2[8].Init( 8*4096*4096/2,4|(c_r[8]<<8)|(c_s[8]<<16),c_s3[8],&STA4[0][0],c_s4[8],0,1,&st2_p1[0]);
+//                mem           c  prmul   smul        sta      s4   keep skip2 st2  // v26 step20: v26 Init signature (no packed c_r)
+    cmC2[0].Init(  8*4096*4096, 3, c_s[0], c_s3[0],&STA6[0][0], c_s4[0],0xf0,1,&st2_p1[0]);
+    cmC2[1].Init( 16*4096*4096, 1, c_s[1], c_s3[1],&STA6[0][0], c_s4[1],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
+    cmC2[2].Init(  8*4096*4096, 1, c_s[2], c_s3[2],&STA6[0][0], c_s4[2],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
+    cmC2[3].Init(  8*4096*4096, 1, c_s[3], c_s3[3],&STA6[0][0], c_s4[3],0xf0,0,&st2_p1[0]); // v26 step20: skip2 1->0
+    cmC2[4].Init(  8*4096*4096, 2, c_s[4], c_s3[4],&STA6[0][0], c_s4[4],0xf0,1,&st2_p1[0]); // v26 16*4096*4096 deferred to step 21
+    cmC2[5].Init(  8*4096*4096, 6, c_s[5], c_s3[5],&STA6[0][0], c_s4[5],0xf0,1,&st2_p1[0]); // v26 16*4096*4096 deferred to step 21
+    cmC2[6].Init(      64*4096, 1, c_s[6], c_s3[6],&STA1[0][0], c_s4[6],0x00,1,&st2_p1[0]);
+    cmC2[7].Init(  2*4096*4096, 1, c_s[7], c_s3[7],&STA5[0][0], c_s4[7],0xf0,1,&st2_p1[0]);
+    cmC2[8].Init(8*4096*4096/2, 4, c_s[8], c_s3[8],&STA4[0][0], c_s4[8],0x00,1,&st2_p1[0]); // v26 8*4096*4096 deferred to step 21
 
-    cmC1[0].Init(     32*4096,2|(c_r[9]<<8)|(c_s[9]<<16),c_s3[9],&STA6[0][0],c_s4[9],0x0,0,&st2_p0[0]);
-    cmC1[1].Init(   2*32*4096,3|(c_r[10]<<8)|(c_s[10]<<16),c_s3[10],&STA7[0][0],c_s4[10],0,1,&st2_p1[0]);
-    cmC1[2].Init(     32*4096,4|(c_r[11]<<8)|(c_s[11]<<16),c_s3[11],&STA2[0][0],c_s4[11],0,1,&st2_p1[0]);
-    cmC1[4].Init(     16*4096,6|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA7[0][0],c_s4[12],0,1,&st2_p1[0]); // v26 step12: +1 ctx (h+PStateH); v26 size 32*4096 deferred to step 21
-    
-    cmC[0].Init(      16*4096,7|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0,1,&st2_p1[0]);
-    cmC44.Init( 1*4096*4096,4|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step19
-    cmcr[0].Init( 1*4096*4096,2|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step18
+    cmC4[0].Init(      32*4096, 2, c_s[9], c_s3[9],&STA6[0][0], c_s4[9],0x00,0);
+    cmC4[1].Init(    2*32*4096, 3, c_s[10],c_s3[10],&STA7[0][0],c_s4[10],0x00,1); // v26 8*32*4096 deferred to step 21
+    cmC4[2].Init(      32*4096, 4, c_s[11],c_s3[11],&STA2[0][0],c_s4[11],0x00,1); // v26 8*32*4096 deferred to step 21
+    cmC4[4].Init(      16*4096, 6, c_s[12],c_s3[12],&STA7[0][0],c_s4[12],0x00,1); // v26 step12: +1 ctx (h+PStateH); v26 32*4096 deferred to step 21
+
+    cmC[0].Init(       16*4096, 7, c_s[13],c_s3[13],&STA2[0][0],c_s4[13],0x00,1,&st2_p1[0]); // v26 2*16*4096 deferred to step 21
+    cmC44.Init(    1*4096*4096, 4, c_s[13],c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step19
+
+    cmcr[0].Init(  1*4096*4096, 2, c_s[13],c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step18
     for (int i=0;i<8;i++)
-        cmcr[i+1].Init( 2048*4096,3|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
+        cmcr[i+1].Init(  2048*4096, 3, c_s[13],c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
+
     for (int i=0;i<4;i++)
-        cmcr2[i].Init( 1*4096*4096,3|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
-    cmC[1].Init(   64*2*4096,3|(c_r[14]<<8)|(c_s[14]<<16),c_s3[14],&STA5[0][0],c_s4[14],0xf0,0,&st2_p0[0]);
-    cmC[2].Init(      2*4096,2|(c_r[15]<<8)|(c_s[15]<<16),c_s3[15],&STA2[0][0],c_s4[15],0xf0,0,&st2_p0[0]);
+    cmcr2[i].Init( 1*4096*4096, 3, c_s[13],c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
 
-    cmC1[3].Init(    128*4096,2|(c_r[16]<<8)|(c_s[16]<<16),c_s3[16],&STA1[0][0],c_s4[16],0,0,&st2_p0[0]);
-    cmC2[9].Init( 8*4096*4096,4|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
-    cmC2[10].Init( 8*4096*4096,6|(c_r[18]<<8)|(c_s[18]<<16),c_s3[18],&STA5[0][0],c_s4[18],0xf0,1,&st2_p1[0]);
-    cmC2[11].Init( 8*4096*4096,5|(c_r[19]<<8)|(c_s[19]<<16),c_s3[19],&STA5[0][0],c_s4[19],0xf0,1,&st2_p1[0]);
-    cmC2[12].Init( 8*4096*4096,2|(c_r[20]<<8)|(c_s[20]<<16),c_s3[20],&STA6[0][0],c_s4[20],0xf0,1,&st2_p1[0]);
-    cmC2[13].Init(16*4096*4096,2|(c_r[21]<<8)|(c_s[21]<<16),c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
+    cmC[1].Init(     64*2*4096, 3, c_s[14],c_s3[14],&STA5[0][0],c_s4[14],0xf0,0,&st2_p0[0]);
+    cmC[2].Init(        2*4096, 2, c_s[15],c_s3[15],&STA2[0][0],c_s4[15],0xf0,0,&st2_p0[0]);
 
-    cmC[3].Init(     32*4096,2|(c_r[22]<<8)|(c_s[22]<<16),c_s3[22],&STA2[0][0],c_s4[22],0x00,1,&st2_p1[0]);  // v26 step3: st2_p2 retired
+    cmC4[3].Init(     128*4096, 2, c_s[16],c_s3[16],&STA1[0][0],c_s4[16],0x00,0);
 
-    cmC2[14].Init(4*4096*4096/2,1|(c_r[23]<<8)|(c_s[23]<<16),c_s3[23],&STA6[0][0],c_s4[23],0xf0,1,&st2_p1[0]);
-    cmC2[15].Init(   8*64*4096,1|(c_r[24]<<8)|(c_s[24]<<16),c_s3[24],&STA1[0][0],c_s4[24],0,0,&st2_p0[0]);
+    cmC2[9].Init(  8*4096*4096, 4, c_s[17],c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
+    cmC2[10].Init( 8*4096*4096, 6, c_s[18],c_s3[18],&STA5[0][0],c_s4[18],0xf0,1,&st2_p1[0]);
+    cmC2[11].Init( 8*4096*4096, 5, c_s[19],c_s3[19],&STA5[0][0],c_s4[19],0xf0,1,&st2_p1[0]);
+    cmC2[12].Init( 8*4096*4096, 2, c_s[20],c_s3[20],&STA6[0][0],c_s4[20],0xf0,1,&st2_p1[0]);
+    cmC2[13].Init(16*4096*4096, 2, c_s[21],c_s3[21],&STA6[0][0],c_s4[21],0xf0,1,&st2_p1[0]);
 
-    cmC[4].Init(    512*4096,1|(c_r[25]<<8)|(c_s[25]<<16),c_s3[25],&STA1[0][0],c_s4[25],0xf0,1,&st2_p1[0]);
-    cmC[5].Init(    512*4096,1|(c_r[26]<<8)|(c_s[26]<<16),c_s3[26],&STA1[0][0],c_s4[26],0xf0,1,&st2_p1[0]);
+    cmC[3].Init(       32*4096, 2, c_s[22],c_s3[22],&STA2[0][0],c_s4[22],0x00,1,&st2_p1[0]); // v26 step3: st2_p2 retired
 
-    cmC2[16].Init( 1*4096*4096/2,1|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
-    cmC2[17].Init( 2*4096*4096,2|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
-    cmC2[18].Init( 4*4096*4096,5|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]); // v26 step17
-    cmC2[19].Init( 2*4096*4096,1|(c_r[17]<<8)|(c_s[17]<<16),c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]); // v26 step17
-    cmC2[20].Init( 8*4096*4096,3|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0xf0,1,&st2_p1[0]); // v26 step16
+    cmC2[14].Init( 2*4096*4096, 1, c_s[23],c_s3[23],&STA6[0][0],c_s4[23],0xf0,1,&st2_p1[0]);
+    cmC2[15].Init(   8*64*4096, 1, c_s[24],c_s3[24],&STA1[0][0],c_s4[24],0x00,0,&st2_p0[0]);
 
-    cmC1[6].Init(1*16*4096,1|(c_r[5]<<8)|(c_s[5]<<16),c_s3[5],&STA6[0][0],c_s4[5],0,0,&st2_p1[0]);
+    cmC[4].Init(      512*4096, 1, c_s[25],c_s3[25],&STA1[0][0],c_s4[25],0xf0,1,&st2_p1[0]);
+    cmC[5].Init(      512*4096, 1, c_s[26],c_s3[26],&STA1[0][0],c_s4[26],0xf0,1,&st2_p1[0]);
 
-    cmC1[7].Init(     16*4096,4|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA2[0][0],c_s4[12],0,1,&st2_p1[0]);
+    cmC2[16].Init(   2048*4096, 1, c_s[17],c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
+    cmC2[17].Init( 2*4096*4096, 2, c_s[17],c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]);
+
+    cmC4[6].Init(    1*16*4096, 1, c_s[5], c_s3[5],&STA6[0][0], c_s4[5],0x00,0); // v26 2*16*4096 deferred to step 21
+
+    cmC4[7].Init(      16*4096, 4, c_s[12],c_s3[12],&STA2[0][0],c_s4[12],0x00,1);
+    cmC4[8].Init(      16*4096, 2, c_s[12],c_s3[12],&STA2[0][0],c_s4[12],0x00,1); // v26 step20 (slots deferred from step 17)
+
+    cmC2[18].Init( 4*4096*4096, 5, c_s[5], c_s3[5],&STA6[0][0], c_s4[5],0xf0,1,&st2_p1[0]); // v26 step17
+    cmC2[19].Init( 2*4096*4096, 1, c_s[17],c_s3[17],&STA6[0][0],c_s4[17],0xf0,1,&st2_p1[0]); // v26 step17
+    cmC2[20].Init( 8*4096*4096, 3, c_s[5], c_s3[5],&STA6[0][0], c_s4[5],0xf0,1,&st2_p1[0]); // v26 step16
+
+    cmCR[0].Init(    8*32*4096, 1, c_s[10],c_s3[10],&STA7[0][0],c_s4[10],0x00,1); // v26 step20
+    cmCR[1].Init(      32*4096, 1, c_s[10],c_s3[10],&STA2[0][0],c_s4[10],0x00,1); // v26 step20
+    cmCR[2].Init(   16*32*4096, 1, c_s[10],c_s3[10],&STA6[0][0],c_s4[10],0x00,0); // v26 step20
 
     brcxt.Init(&brackets[0],8);
     qocxt.Init(&quotes[0],4,true);
@@ -4410,7 +4241,7 @@ int modelPrediction(int c0,int bpos,int c4){
         if (c1<'a' )brcxt.Update( c1 );               // advance bracket context only if no letters, so we do not get out of range
 
         if (c1==SPACE && c2==LESSTHAN) brcxt.Update( GREATERTHAN ); // Probably math operator, ignore
-        cmC[4].set((brcxt.context<<8)+c1);
+        // v26 step20: cmC[4] set moved below cmC[5] (after qocxt update), gains qocxt variant
         // Quote context update
         qocxt.Update(c1); 
         if (htcxt.cxt && c2=='L'&&(c1==SPACE || c1=='!'|| c1<128 )) {
@@ -4880,6 +4711,11 @@ int modelPrediction(int c0,int bpos,int c4){
         // We set our context now as below it my change
         cmC[5].set((fccxt.context&0xff00)+c1+(stream2b&12)*256+((brcontext+ brcxt.last())<<24));
 
+        if (qocxt.context) // v26 step20: quote context preferred
+            cmC[4].set((qocxt.context<<8)+c1);
+        else
+            cmC[4].set((brcxt.context<<8)+c1);
+
         // List - needs fixme
         if (fc=='*' && c1!=SPACE) {
             fc=min(c1,TEXTDATA);
@@ -5022,17 +4858,20 @@ int modelPrediction(int c0,int bpos,int c4){
         if (fc==SPACE || brcxt.cxt==LESSTHAN) {
                cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets(); cmC2[5].sets();
             cmC2[20].sets(); cmC2[20].sets();cmC2[20].sets(); // v26 step16
+            cmC4[8].sets(); cmC4[8].sets(); // v26 step20
         } else {
             // Last sentence word(4) that is not Adjective with last Adjectiv stream word in a line.
-            cmC2[5].set(worcxt.Word(4)*53+worcxt1.Word(1)+h+(stream3b & 511));
+            cmC2[5].set(hash(worcxt.Word(4),worcxt1.Word(1)+h,(stream3b & 511))); // v26 step20: hash form
             // Last sentence word(4+) that is not Verb (when found 4+) with last Verb in a line.
-            cmC2[5].set(worcxt.Last(4,worcxt.Type(4)^Verb)*53+sVerb+h+(stream3bR & 63));
-            cmC2[5].set(worcxt.fword*53+worcxt1.Word(1)+h+(stream3b & 63));
-            cmC2[5].set(worcxt2.Word(1)+worcxt2.Word(2)*11+word00+c1); 
+            cmC2[5].set(hash(worcxt.Last(4,worcxt.Type(4)^Verb),sVerb+h,(stream3bR & 63))); // v26 step20: hash form
+            cmC2[5].set(hash(worcxt.fword,worcxt1.Word(1)+h,(stream3b & 63))); // v26 step20: hash form
+            cmC2[5].set(hash(worcxt2.Word(1),worcxt2.Word(2),word00+c1)); // v26 step20: hash form
             // Look for last verb in paragraph if found set with word ()
             const U32 lastParVerb=worcxt2.LastIf(1,worcxt.Type(1)&Verb);
-            if (lastParVerb) cmC2[5].set(lastParVerb*11+word00+c1);
-            else cmC2[5].sets();        
+            if (lastParVerb) cmC2[5].set(hash(lastParVerb,word00,c1)); // v26 step20: hash form
+            else cmC2[5].sets();
+            cmC4[8].set(hash(h,worcxt0.Word0(1))); // v26 step20 (slot deferred from step 17)
+            cmC4[8].set(hash(worcxt1.Word(1),worcxt1.Word(2),h)); // v26 step20 (slot deferred from step 17)
 
             cmC2[20].set(hash(wt3cxt,word0,(stream3b & 63)));             //hash of current sentance word types with current word and last 2 3bit words // v26 step16
             cmC2[20].set(hash(wt3cxt,worcxt2.Word(1),(stream3b & 511)));  //hash of current sentance word types with last worcxt2 word context and last 3 3bit words // v26 step16
@@ -5103,7 +4942,7 @@ int modelPrediction(int c0,int bpos,int c4){
         // end // v26 step17
 
         // current word and word(1) type upto preffix(not included), paragraph word(1) 
-        cmC1[6].set(h+(worcxt.Type(1)&(0x1FF))+worcxt1.Word(1)); 
+        cmC4[6].set(h+(worcxt.Type(1)&(0x1FF))+worcxt1.Word(1)); 
         if (isMatch>61) cmC2[6].sets(); else cmC2[6].set(((stream2b&15)<<16)+(t[2]&0xffff));  // o2 // v26 step9
 
         if (c1==ESCAPE || utf8left || fccontext==CURLYOPENING) 
@@ -5126,36 +4965,36 @@ int modelPrediction(int c0,int bpos,int c4){
             cmC2[8].set((c4 & 0xffffff) + ((stream2b << 18) & 0xff000000));
         
         if (skipM1) { // v26 step9 (v26 cmC4[0])
-            cmC1[0].sets();
-            cmC1[0].sets();
+            cmC4[0].sets();
+            cmC4[0].sets();
         }else{
-            cmC1[0].set(colcxt.lastfc(0) | (fccontext<< 15) | ((stream3b & 63) << 7)|(brcontext << 24) );
-            cmC1[0].set((colcxt.lastfc(0) | ((c4 & 0xffffff) << 8)));
+            cmC4[0].set(colcxt.lastfc(0) | (fccontext<< 15) | ((stream3b & 63) << 7)|(brcontext << 24) );
+            cmC4[0].set((colcxt.lastfc(0) | ((c4 & 0xffffff) << 8)));
         }
     
-        cmC1[1].set( (stream2b & 3) +word00*11);
-        cmC1[1].set(c4 & 0xffff);
-        cmC1[1].set(((fc << 11) | c1)+((stream2b & 3)<< 18));
+        cmC4[1].set( (stream2b & 3) +word00*11);
+        cmC4[1].set(c4 & 0xffff);
+        cmC4[1].set(((fc << 11) | c1)+((stream2b & 3)<< 18));
     
-        cmC1[2].set((stream2b & 15)+((stream3b & 7) << 6 ));
-        cmC1[2].set(c1 | ((col * (c1 == SPACE)) << 8)|((stream2b & 15) << 16));
+        cmC4[2].set((stream2b & 15)+((stream3b & 7) << 6 ));
+        cmC4[2].set(c1 | ((col * (c1 == SPACE)) << 8)|((stream2b & 15) << 16));
  
-        if (isCategory) cmC1[2].sets(); else cmC1[2].set((wt4cxtW1*191)+word0); // v26 step11+step16
+        if (isCategory) cmC4[2].sets(); else cmC4[2].set((wt4cxtW1*191)+word0); // v26 step11+step16
         if (c1==ESCAPE || fc==SPACE || utf8left)  
-            cmC1[2].sets();
+            cmC4[2].sets();
         else 
-            cmC1[2].set((91 * 83* worcxt.Word(1) + 89 * word0));
+            cmC4[2].set((91 * 83* worcxt.Word(1) + 89 * word0));
 
         if (fc==SPACE) 
-            cmC1[4].sets();
+            cmC4[4].sets();
         else
-            cmC1[4].set((c1 + ((stream3b & 0xe38) << 6)) );
+            cmC4[4].set((c1 + ((stream3b & 0xe38) << 6)) );
 
-        cmC1[4].set(worcxt.fword*11+BrFcIdx);
-        cmC1[4].set(c1+word0+number0*191 );
-        cmC1[4].set(((c4 & 0xffff) << 16) | (fccontext  << 8) |fc);
-        cmC1[4].set(((stream3bR & 0xfff)<< 8)+((stream2b & 0xfc)));
-        cmC1[4].set(h+PStateH); // v26 step12 (v26 cmC4[4] 6th slot)
+        cmC4[4].set(worcxt.fword*11+BrFcIdx);
+        cmC4[4].set(c1+word0+number0*191 );
+        cmC4[4].set(((c4 & 0xffff) << 16) | (fccontext  << 8) |fc);
+        cmC4[4].set(((stream3bR & 0xfff)<< 8)+((stream2b & 0xfc)));
+        cmC4[4].set(h+PStateH); // v26 step12 (v26 cmC4[4] 6th slot)
 
         // Mostly table and column related contexts
         if (c1==ESCAPE) {
@@ -5165,14 +5004,17 @@ int modelPrediction(int c0,int bpos,int c4){
             // Switch between word/paragraph or column mode
             if (isParagraph==1) {
                 // Word
-                cmC[0].set(worcxt.fword*3191+(stream2b & 3));
+                if (fccxt.cxt==SQUAREOPEN) cmC[0].sets(); // v26 step20
+                else cmC[0].set(worcxt.fword*3191+(stream2b & 3));
                 cmC[0].set(h+firstWord*89);
                 cmC[0].set(word0*53+c1+BrFcIdx+PStateH); // v26 step12
             } else {
                 // Column
-                cmC[0].set(above | ((stream3b & 0x3f) << 9) | (colcxt.collen() << 19)| ((stream2b & 3) << 16) );
+                if (fccxt.cxt==SQUAREOPEN) cmC[0].sets(); // v26 step20
+                else cmC[0].set(above | ((stream3b & 0x3f) << 9) | (colcxt.collen() << 19)| ((stream2b & 3) << 16) );
                 cmC[0].set(h+firstWord*89);
-                cmC[0].set(above | (c1 << 16)| ((col+numlen0+BrFcIdx) << 8)| (above1<< 24) );
+                if (fccxt.cxt==SQUAREOPEN) cmC[0].sets(); // v26 step20
+                else cmC[0].set(above | (c1 << 16)| ((col+numlen0+BrFcIdx) << 8)| (above1<< 24) );
             }
             if (colcxt.lastfc()=='*') {
                 // List
@@ -5214,8 +5056,8 @@ int modelPrediction(int c0,int bpos,int c4){
         cmC[2].set((c1 << 8) | (indirectByte >> 2)| (fc << 16));  //
         cmC[2].set((c4 & 0xffff)+(c2==c3?1:0));
    
-        cmC1[3].set((stream3b & stream3bMask)*256 | (stream2b &stream2bMask& 255) );
-        if ( skipSeeExternal) cmC1[3].sets(); else cmC1[3].set(x4); // v26 step11
+        cmC4[3].set((stream3b & stream3bMask)*256 | (stream2b &stream2bMask& 255) );
+        if ( skipSeeExternal) cmC4[3].sets(); else cmC4[3].set(x4); // v26 step11
 
         // Word stream. word(1) with first char context and last bit3word(1-x)
         cmC2[9].set(257 * (*pWord).Hash+fccontext + 193 * (stream3b & stream3bMask));
@@ -5251,7 +5093,8 @@ int modelPrediction(int c0,int bpos,int c4){
         cmC2[11].set(c1 + ((stream3b<< 5) & 0x1fffff00));
         cmC2[11].set(stream2bR*16+BrFcIdx );
         // Indirect byte with bracket context and last non repeating bit2words(2-10)
-        cmC2[11].set(((indirectByte& 0xffff)>>8) + ((64 * stream2bR) & 0x3ffff00)+(brcontext<< 25)); // end good
+        if (brcxt.cxt==LESSTHAN) cmC2[11].sets(); // v26 step20
+        else cmC2[11].set(((indirectByte& 0xffff)>>8) + ((64 * stream2bR) & 0x3ffff00)+(brcontext<< 25)); // end good
         // Byte from prvious word(0), pos if in range(255), indirect byte
         if (fccontext==FIRSTUPPER && brcontext==SQUAREOPEN) {
             cmC2[11].sets();
@@ -5279,9 +5122,9 @@ int modelPrediction(int c0,int bpos,int c4){
             }
             //column
             else if (col==31) {
-                cmC2[12].set(c4<<16);
+                cmC2[12].set(U32(c4)<<16); // v26 step20: unsigned shift, was UB (v26 col==31 fix site)
             } else {
-                cmC2[12].set(above | ((c4 &0xffff)<< 16)| (above1<< 8));
+                cmC2[12].set(above | ((U32(c4) &0xffff)<< 16)| (above1<< 8)); // v26 step20: cast as in v26
             }
         }
         // Word/centence. 
@@ -5317,13 +5160,23 @@ int modelPrediction(int c0,int bpos,int c4){
         // Local, small memory
         if (c1==ESCAPE|| utf8left || fc==SPACE || skipSeeExternal) { // v26 step11
             // Disabled when: escaped utf8, fist char space,
-            cmC1[7].sets(); cmC1[7].sets(); cmC1[7].sets(); cmC1[7].sets();
+            cmC4[7].sets(); cmC4[7].sets(); cmC4[7].sets(); cmC4[7].sets();
         } else {
-            cmC1[7].set(worcxt1.Word()+word00);
-            cmC1[7].set(worcxt.Word(2)+word0*191+(stream3bR & 63));
-            cmC1[7].set(word0*191+(stream3bR & 63));
-            cmC1[7].set((indirectWord0Pos&0xffff)*191+ word0+(stream3bR & 63));
+            cmC4[7].set(worcxt1.Word()+word00);
+            cmC4[7].set(worcxt.Word(2)+word0*191+(stream3bR & 63));
+            cmC4[7].set(word0*191+(stream3bR & 63));
+            cmC4[7].set((indirectWord0Pos&0xffff)*191+ word0+(stream3bR & 63));
         }
+
+        if (brcxt.cxt==SQUAREOPEN) // v26 step20
+            cmCR[0].set((worcxt.Word(1)+word0));
+        else if (fccxt.cxt==HTLINK)
+            cmCR[0].sets();
+        else
+            cmCR[0].set(0);
+
+        cmCR[1].set((fccxt.cxt<< 15) | ((stream3b & 7) << 3)|(brcxt.cxt << 24)); // v26 step20
+        cmCR[2].set( hash(  worcxt.Word(), stream2b& 0xFC, c1)); // v26 step20
 
         scmA[0].set(c1);
         //scmA[1].set(c2*(isParagraph));  // v26 port: SSCM removed
@@ -5416,14 +5269,14 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC2[6].mix();
     cmC2[7].mix();
     cmC2[8].mix();
-    cmC1[0].mix();
-    cmC1[1].mix();
-    cmC1[2].mix();
-    cmC1[4].mix();   
+    cmC4[0].mix();
+    cmC4[1].mix();
+    cmC4[2].mix();
+    cmC4[4].mix();   
     cmC[0].mix();
     cmC[1].mix();
     cmC[2].mix();
-    cmC1[3].mix();
+    cmC4[3].mix();
     cmC2[9].mix();
     cmC2[10].mix();
     cmC2[11].mix();
@@ -5439,10 +5292,14 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC2[16].mix();
     cmC2[17].mix();
     cmC2[19].mix(); // v26 step17
-    cmC1[6].mix();
-    cmC1[7].mix();
+    cmC4[6].mix();
+    cmC4[7].mix();
+    cmC4[8].mix(); // v26 step20
     cmC2[18].mix(); // v26 step17
     cmC2[20].mix(); // v26 step16
+    cmCR[0].mix(); // v26 step20
+    cmCR[1].mix(); // v26 step20
+    cmCR[2].mix(); // v26 step20
     for (int i=0;i<9;i++) cmcr[i].mix();  // v26 step18
     for (int i=0;i<4;i++) cmcr2[i].mix(); // v26 step18
     rcmA[0].mix();
@@ -5597,6 +5454,7 @@ void update1() {
     x.bpos=(x.bpos+1)&7;
     x.bposshift=7-x.bpos;
     x.c0shift_bpos=(x.c0<<1)^(256>>(x.bposshift));
+    x.cmBitState=getStateByteLocation(x.bpos,x.c0); // v26 step20
 
     mxA[0].update(x.y);
     mxA[1].update(x.y);
@@ -5677,6 +5535,14 @@ inline Predictor::Predictor()  {
     for (int i=0;i<4096;i++) {
         st2_p1[i]=clp(sc(13*(i - 2048)));  // v26 step3: 12->13
         st2_p2[i]=clp(sc(14*(i - 2048)));
+    }
+    // run pr // v26 step20
+    // precalc int c=ilog(rc+1)<<(2+(~rc&1));
+    for (int rc=0; rc<256; rc++) {
+        int c=ilog[rc];
+        c=c<<(2+(~rc&1));
+        rcpr[rc+256]=clp(c);
+        rcpr[rc]=clp(-c);
     }
     // Match model
     mhashtablemask=0x200000*2-1;
