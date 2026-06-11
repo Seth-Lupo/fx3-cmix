@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2;  // v26 port: SparseMatchModel removed (-2)
+int num_models = 439+1-2-7-2-4;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -3233,12 +3233,12 @@ void PredictorInit() {
     smA[2].Init(1<<16,1023);
 
     scmA[0].Init(8); 
-    scmA[1].Init(8); 
-    scmA[2].Init(8); 
+    //scmA[1].Init(8);   // v26 port: SSCM removed
+    //scmA[2].Init(8);   // v26 port: SSCM removed
     scmA[3].Init(9); 
-    scmA[4].Init(8); 
+    //scmA[4].Init(8);   // v26 port: SSCM removed
     scmA[5].Init(8); 
-    scmA[6].Init(7); 
+    //scmA[6].Init(7);   // v26 port: SSCM removed
 
     // Mixers      size,  shift, err, errmul 
     mxA[0].Init(    2048, 237,  8, 69); // general
@@ -4474,12 +4474,12 @@ int modelPrediction(int c0,int bpos,int c4){
         }
 
         scmA[0].set(c1);
-        scmA[1].set(c2*(isParagraph));
-        scmA[2].set((indirectWord&0xffffff)>>16);
+        //scmA[1].set(c2*(isParagraph));  // v26 port: SSCM removed
+        //scmA[2].set((indirectWord&0xffffff)>>16);  // v26 port: SSCM removed
         scmA[3].set(stream3b&0x1ff);
-        scmA[4].set(stream2b&0xff);
+        //scmA[4].set(stream2b&0xff);  // v26 port: SSCM removed
         scmA[5].set(brcontext);
-        scmA[6].set(isParagraph+ 2*((stream3bR&0x3f)) );
+        //scmA[6].set(isParagraph+ 2*((stream3bR&0x3f)) );  // v26 port: SSCM removed
 
         if (wshift||c1==LF) {
             word3=word3*47, word2=word2*53, word1=word1*83;
@@ -4499,12 +4499,12 @@ int modelPrediction(int c0,int bpos,int c4){
     const int c0b=c0<<(8-bpos);
     
     scmA[0].mix(sscmrate);
-    scmA[1].mix(sscmrate);
-    scmA[2].mix(sscmrate);
+    //scmA[1].mix(sscmrate);  // v26 port: SSCM removed
+    //scmA[2].mix(sscmrate);  // v26 port: SSCM removed
     scmA[3].mix(sscmrate);
-    scmA[4].mix(sscmrate);
+    //scmA[4].mix(sscmrate);  // v26 port: SSCM removed
     scmA[5].mix(sscmrate);
-    scmA[6].mix(sscmrate);
+    //scmA[6].mix(sscmrate);  // v26 port: SSCM removed
 
     isMatch=MatchModel2mix();
     //smatch.p();  // v26 port: SparseMatchModel removed
