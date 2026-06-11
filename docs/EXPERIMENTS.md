@@ -32,6 +32,10 @@ Every experiment gets a row here — **including null and negative results**. De
 | 004 | 2026-06-11 | main | T1-mid | text_mid10M | 1,620,639 | anchor | 1h00m* | 5.96 GB | ✅ anchor | mid-file slice; *wall contaminated by debug contention |
 | — | 2026-06-11 | exp/order-v26 | — | — | — | author-measured −147,767 | — | — | 🎯 queued for T3 | kaitz's 2025-04 article order recovered (see ARTICLE-ORDER-NOTES.md); needs full-run validation after baseline completes |
 
+| v26-a | 2026-06-11 | standalone v26 (fixed) | T0 | coded_1M | 101,706 | n/a (different input domain) | 157s c | — | ✅ RT OK | -O3, deterministic post-fix |
+| v26-b | 2026-06-11 | standalone v26 (fixed) | T1 | coded_10M | 1,646,440 | n/a | 20m53s | **6.77 GB** | ✅ measured | spot1 core1 (other core busy); RSS sets co-location budget |
+| v26-c | 2026-06-11 | standalone v26 (fixed) | T3 | coded_full (586 MB) | *running* | kaitz ladder predicts ≈113.6 M | est ~20 h c + ~20 h d | — | ⏳ | lab1 core3, /mnt/work/v26full; validates fix at scale + true v26 number on our build |
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### ✅ M2 SOLVED (2026-06-11 00:40) — fx3 nondeterminism root cause
