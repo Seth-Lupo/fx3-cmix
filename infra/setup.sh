@@ -32,11 +32,13 @@ if [ ! -d "$HOME/fx3-cmix" ]; then
 fi
 
 echo "=== enwik9 ==="
-if [ ! -f /mnt/work/enwik9 ]; then
+if [ "${SKIP_ENWIK9:-0}" = "1" ]; then
+  echo "skipped (SKIP_ENWIK9=1)"
+elif [ ! -f /mnt/work/enwik9 ]; then
   wget -q --show-progress https://mattmahoney.net/dc/enwik9.zip -O /mnt/work/enwik9.zip
   unzip -o /mnt/work/enwik9.zip -d /mnt/work
   rm /mnt/work/enwik9.zip
 fi
-md5sum /mnt/work/enwik9   # expect e206c3450ac99950df65bf70ef61a12d
+if [ -f /mnt/work/enwik9 ]; then md5sum /mnt/work/enwik9; fi   # expect e206c3450ac99950df65bf70ef61a12d
 
 echo "=== done ==="
