@@ -12,6 +12,10 @@ Every experiment gets a row here — **including null and negative results**. De
 ## Proxy validation status
 **Not yet validated.** No proxy number may be used for a keep/drop decision until the tier ladder is calibrated (Phase 0.4 in PLAN.md).
 
+## Findings log
+- **2026-06-10 — fx2-cmix crashes on Linux 6.x kernels (fixed).** The PPM `mmap_to_disk` RSS-dropping cycle (`ppmd.cpp` ByteUpdate, every 20,000 bytes) did `munmap` + `mmap(NULL,…)` and relied on the kernel reusing the same address; ppmd stores absolute pointers into that heap. Linux 6.8 (Ubuntu 22.04 Azure) places the remap elsewhere → deterministic SIGSEGV at the first remap (39.95% of the PGO input). Fixed with an atomic `MAP_FIXED` remap at the original address; output verified byte-identical to `mmap_to_disk=false` (md5 `0888f9d854f06b21d210fef7c13a5562` both ways). Implication: the published fx2-cmix binary is kernel-sensitive — worth noting in any submission write-up; also means judge-machine kernel matters.
+- **2026-06-10 — VM platform**: lab1 = Xeon Platinum 8272CL (Cascade Lake), same µarch generation as fx2's reference c2-standard-4. `-march=corei7` cannot build (fxcmv1 requires AVX2); usable march values: `native`, `znver2`, or ≥haswell.
+
 ## Ledger
 | ID | Date | Branch / sha | Tier | Dataset | Bytes out | Δ vs baseline | Wall time | Peak RSS | Verdict | Notes |
 |----|------|--------------|------|---------|-----------|---------------|-----------|----------|---------|-------|
