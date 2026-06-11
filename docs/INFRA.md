@@ -3,6 +3,14 @@
 ## Local machine
 M1 Mac (ARM, darwin). **Cannot build or benchmark x86-64 submission binaries.** Used only for orchestration, docs, git, and Azure CLI.
 
+## Current VMs (2026-06-11)
+| VM | IP | Size | Role |
+|---|---|---|---|
+| lab1 | 20.29.69.113 | D4ds_v4 on-demand | core0: enwik9 baseline anchor (→~Jun13); core3: v26 standalone 586MB RT (/mnt/work/v26full); /mnt/work/proxy has all slices + full streams |
+| exp1 | 130.131.243.31 | E2s_v3 on-demand | experiment lane, SINGLE-TENANT for 25-step builds (~8GB RSS); auto-shutdown 09:00 UTC daily (disable for overnight jobs) |
+
+spot1 deleted 2026-06-11 (3 evictions; user approved on-demand swap). SSH user `hutter`, key ~/.ssh/id_ed25519; lab1's pubkey is in exp1's authorized_keys for direct scp. Eviction/rebuild routine: provision.sh + setup.sh SKIP_ENWIK9=1 + scp slices from lab1.
+
 ## Azure
 - Subscription: **Azure for Students** (`eb6d20b6-8925-47bd-9ebc-06307613893b`), tenant Tufts, user slupo01@tufts.edu.
 - 2026-06-10: Microsoft.Compute/Network/Storage providers registered.
