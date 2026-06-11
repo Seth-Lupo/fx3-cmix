@@ -5178,7 +5178,7 @@ int modelPrediction() {
             }
             //column
             else if (col==31) {
-                cmC2[12].set(c4<<16);
+                cmC2[12].set(U32(c4)<<16);  // unsigned shift, was UB
             } else {
                 cmC2[12].set(above | ((U32(c4) &0xffff)<< 16)| (above1<< 8));  // unsigned shift, was UB
             }

@@ -4750,7 +4750,7 @@ void update1() {
     pz=apmA5.p(pu,   ((x.c0*4)^hash(min(9,pz),x5&0x80ff))&0x3ffff, rate,x.y);
     AddPrediction(pz);
     if (fails&255) pr=(pt*6+pu  +pv*11+pz*14 +31)>>5;
-    else           pr=(pt*4+pu*5+pv*12+pz*11 +31)>>5;
+    else           pr=(pt*4+pu*7+pv*12+pz*9 +31)>>5;
     AddPrediction(pr);
 
 }
@@ -4780,8 +4780,8 @@ inline Predictor::Predictor()  {
         st2_p2[i]=clp(sc(14*(i - 2048)));
     }
     // Match model
-    mhashtablemask=0x200000*1-1;
-    alloc1(mhashtable,0x200000*1+32,mhptr,32);
+    mhashtablemask=0x200000*2-1;
+    alloc1(mhashtable,0x200000*2+32,mhptr,32);
     // Generate state tables
     StateTable statetable;
     statetable.Init(28, 28, 31, 29, 23, 4, 17,&STA1[0][0]);
