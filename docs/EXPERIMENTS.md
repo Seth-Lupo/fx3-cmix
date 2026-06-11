@@ -23,8 +23,11 @@ Every experiment gets a row here — **including null and negative results**. De
 | 000b | 2026-06-10 | main (mmap fix) | T3 | enwik9 | *running* | baseline anchor | est. ~65–75 h | — | ⏳ launched | lab1 core 0, /mnt/work/baseline, expect S2≈110.35 MB |
 | 001 | 2026-06-11 | main | T1 | text_10M | 1,065,537 | baseline | 50m54s | 5.99 GB | ✅ anchor | lab1 core 2 (concurrent w/ baseline) |
 | 002 | 2026-06-11 | main SEED=1 | T0 | text_1M | 71,314 | −31 B vs 71,345 | 8m38s | 5.73 GB | ✅ noise probe | spot1; seed⊕machine confounded → T0 noise floor ≈ tens of bytes; decision threshold ≥300 B |
-| 003 | 2026-06-11 | main | T0 | text_1M | *running* | — | — | — | ⏳ | spot1 cross-machine replication (vs lab1 71,345) |
+| 003 | 2026-06-11 | main | T0 | text_1M | 71,345 | ±0 vs lab1 | 10m14s* | 5.72 GB | ✅ **cross-machine identical** | spot1; sizes are µarch-portable (*wall contaminated by debug contention) |
 | 004 | 2026-06-11 | main | T1-mid | text_mid10M | *running* | — | — | — | ⏳ | spot1, mid-file anchor |
+| 005 | 2026-06-11 | main (PGO build) | T0 | text_1M | 71,298 | **−47 vs plain** | 4m54s | — | ⚠️ build-config sensitivity | lab1; PGO+LTO changes FP rounding → different (slightly better) output. Rule: experiments plain-vs-plain; final numbers always with submission build recipe |
+
+**Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### M1/M2 progress (kaitz fxcm v26 standalone)
 - v26 builds on Linux (3-line port, `standalone/`). Compress works (coded_1M → 101,704 B; coded_100k repro). **Decompress segfaults** at `procWord` (fxcm.cpp:4157, bogus codeword → `dictWLen[]` OOB) — encoder/decoder divergence on Linux/clang-17. UBSan flags signed-overflow/shift UB at :2029/:5163/:5235. `-fwrapv` alone does NOT fix. Sanitized round-trip + `-O0` test in progress. Working theory: optimizer-exploited UB → asymmetric miscompile; plausibly related to kaitz's integration determinism bug.
