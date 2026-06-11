@@ -5,8 +5,8 @@ M1 Mac (ARM, darwin). **Cannot build or benchmark x86-64 submission binaries.** 
 
 ## Azure
 - Subscription: **Azure for Students** (`eb6d20b6-8925-47bd-9ebc-06307613893b`), tenant Tufts, user slupo01@tufts.edu.
-- 2026-06-10: Microsoft.Compute/Network/Storage providers were NotRegistered; registration submitted. Check with `az provider show -n Microsoft.Compute --query registrationState`.
-- Quotas unknown until registration completes: `az vm list-usage --location eastus -o table`. Student subs typically allow ~6 vCPUs/region, B/Dv5/Dasv5 families.
+- 2026-06-10: Microsoft.Compute/Network/Storage providers registered.
+- **Quotas (eastus, confirmed 2026-06-10):** 6 regional vCPUs total; 4 vCPUs per family for Dv4/Ddv4/Dasv4/Ddsv4/Dv3/Fsv2 etc. **All v5+ families are quota 0.** Burstable Bsv2/Basv2 have 10 (timing-unreliable; non-timing utility work only).
 
 ### VM selection rationale
 The prize time budget is 70,000/T hours (T = Geekbench 5 single-core). Faster single-core ⇒ shorter wall-clock but proportionally smaller budget, so the ratio is roughly hardware-neutral; what matters is:
@@ -14,7 +14,7 @@ The prize time budget is 70,000/T hours (T = Geekbench 5 single-core). Faster si
 2. Strong, *consistent* single-core (no burstable B-series for timing runs).
 3. ≥16 GB RAM (10 GB working set + OS headroom), ~64 GB disk (enwik9 + temp ~21 GB).
 
-Preferred: **D4ds_v5 / D4as_v5 / F4s_v2** (4 vCPU, 16 GB) — run experiments pinned to one core (`taskset -c 0`). Spot for sweeps, on-demand for long validation runs.
+Chosen within quota: **Standard_D4ds_v4** (4 vCPU, 16 GB RAM, 150 GiB local temp SSD — Cascade Lake, the same platform generation as fx2's reference c2-standard-4). F4s_v2 rejected: only 8 GB RAM. Run experiments pinned to one core (`taskset -c 0`). Spot (3 low-priority vCPU quota) for sweeps where eviction is tolerable; on-demand for long validation runs.
 
 ### Standard provisioning (Phase 0.1, to be scripted in `infra/`)
 - Ubuntu 22.04 LTS Gen2 image, SSH key auth, auto-shutdown tag for idle protection.
