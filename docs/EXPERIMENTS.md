@@ -27,6 +27,9 @@ Every experiment gets a row here — **including null and negative results**. De
 | 004 | 2026-06-11 | main | T1-mid | text_mid10M | *running* | — | — | — | ⏳ | spot1, mid-file anchor |
 | 005 | 2026-06-11 | main (PGO build) | T0 | text_1M | 71,298 | **−47 vs plain** | 4m54s | — | ⚠️ build-config sensitivity | lab1; PGO+LTO changes FP rounding → different (slightly better) output. Rule: experiments plain-vs-plain; final numbers always with submission build recipe |
 
+| 006 | 2026-06-11 | exp/006-lstm-lr016 | T0 | text_1M | 71,453 | **+108** | 5m18s | 5.73 GB | ❌ reject | LSTM lr 0.03→0.016 worse; 0.03 near-tuned |
+| 007 | 2026-06-11 | exp/007-ppm-order26 | T0 | text_1M | *running* | — | — | — | ⏳ | PPM order 25→26 (PPM survives fx3 pivot) |
+
 **Noise model (T0, 1 MB):** machine Δ=0; SEED Δ≈31 B; build-config (PGO) Δ≈47 B. Decision threshold at T0 stays ≥300 B for single-knob changes; anything smaller needs T1 confirmation.
 
 ### M1/M2 progress (kaitz fxcm v26 standalone)
