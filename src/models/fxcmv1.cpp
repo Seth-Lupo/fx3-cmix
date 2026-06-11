@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15+30+154;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18)
+int num_models = 439+1-2-7-2-4+5+4+15+30+154+20;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18) +cmC44 4 slots(20, step19)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -212,7 +212,7 @@ struct BlockData {
     }
 };
 
-BlockData<528+256> x; //maintains current global data block // v26 step18: S=784 >= N=768
+BlockData<528+272> x; //maintains current global data block // v26 step19: S=800 >= N=784
 
 
 // ilog(x) = round(log2(x) * 16), 0 <= x < 256
@@ -3379,6 +3379,282 @@ public:
   }
 };
 
+// v26 step19: paq8px-derived XML model (verbatim from standalone fxcm v26)
+// ===== XML model ======
+
+#define CacheSize (1<<5)
+struct XMLAttribute {
+    U32 Name, Value, Length;
+};
+
+struct XMLContent {
+    U32 Data, Length, Type;
+};
+
+struct XMLTag {
+    U32 Name, Length;
+    int Level;
+    bool EndTag, Empty;
+    XMLContent Content;
+    struct XMLAttributes {
+        XMLAttribute Items[4];
+        U32 Index;
+    } Attributes;    
+};
+
+struct XMLTagCache {
+    XMLTag Tags[CacheSize];
+    U32 Index;
+};
+
+enum ContentFlags {
+    xText        = 0x001,
+    xNumber      = 0x002,
+    xDate        = 0x004,
+    xTime        = 0x008,
+    xURL         = 0x010,
+    xLink        = 0x020,
+    xCoordinates = 0x040,
+    xTemperature = 0x080,
+    xISBN        = 0x100
+};
+
+enum XMLState {
+    xNone               = 0,
+    xReadTagName        = 1,
+    xReadTag            = 2,
+    xReadAttributeName  = 3,
+    xReadAttributeValue = 4,
+    xReadContent        = 5,
+    xReadCDATA          = 6,
+    xReadComment        = 7
+};
+
+#define DetectContent() { \
+  if ((x.c4&0xF0F0F0F0)==0x30303030){ \
+    int i = 0, j = 0; \
+    while ((i<4) && ( (j=(x.c4>>(8*i))&0xFF)>=0x30 && j<=0x39 )) \
+      i++; \
+\
+    if (i==4 && ( ((c8&0xFDF0F0FD)==0x2D30302D && buf(9)>=0x30 && buf(9)<=0x39) || ((c8&0xF0FDF0FD)==0x302D302D) )) \
+      (*Content).Type |= xDate; \
+  } \
+  else if (((c8&0xF0F0FDF0)==0x30302D30 || (c8&0xF0F0F0FD)==0x3030302D) && buf(9)>=0x30 && buf(9)<=0x39){ \
+    int i = 2, j = 0; \
+    while ((i<4) && ( (j=(c8>>(8*i))&0xFF)>=0x30 && j<=0x39 )) \
+      i++; \
+\
+    if (i==4 && (x.c4&0xF0FDF0F0)==0x302D3030) \
+      (*Content).Type |= xDate; \
+  } \
+\
+  if ((x.c4&0xF0FFF0F0)==(0x30003030+COLON*256*256) && buf(5)>=0x30 && buf(5)<=0x39 && ((buf(6)<0x30 || buf(6)>0x39) || ((c8&0xF0F0FF00)==(0x30300000+COLON*256) && (buf(9)<0x30 || buf(9)>0x39)))) \
+    (*Content).Type |= xTime; \
+\
+  if ((*Content).Length>=8 && (c8&0x80808080)==0 && (x.c4&0x80808080)==0) \
+    (*Content).Type |= xText; \
+\
+  if ((c8&0xF0F0FF)==0x3030C2 && (x.c4&0xFFF0F0FF)==0xB0303027){ \
+    int i = 2; \
+    while ((i<7) && buf(i)>=0x30 && buf(i)<=0x39) \
+      i+=(i&1)*2+1; \
+\
+    if (i==10) \
+      (*Content).Type |= xCoordinates; \
+  } \
+\
+  if ((x.c4&0xFFFFFA)==0xC2B042 && B!=0x47 && (((x.c4>>24)>=0x30 && (x.c4>>24)<=0x39) || ((x.c4>>24)==0x20 && (buf(5)>=0x30 && buf(5)<=0x39)))) \
+    (*Content).Type |= xTemperature; \
+\
+  if (B>=0x30 && B<=0x39) \
+    (*Content).Type |= xNumber; \
+\
+  if (lastCW==cwISBN && buf(4)==UPPER) \
+    (*Content).Type |= xISBN; \
+} 
+U32 xlU1=0,xlU2=0,xlU3=0,xlU4=0;
+bool isXML=false;
+struct XMLModel1 {
+    XMLTagCache Cache;
+    XMLState State, pState;
+    U32 c8, WhiteSpaceRun, pWSRun, IndentTab, IndentStep, LineEnding,lastState;
+    U32 StateBH[8];
+
+    void Init() {
+        c8=0;
+        Reset();
+    }
+    void Reset() {
+        State=xNone, pState=xNone, 
+        WhiteSpaceRun=0, pWSRun=0, IndentTab=0, IndentStep=2, LineEnding=2,lastState=0;
+        memset(&Cache, 0, sizeof(XMLTagCache));
+        memset(&StateBH, 0, sizeof(StateBH));  
+    }
+    int p() {
+        xlU4=0;
+        if (x.bpos==0) {
+            U8 B=(U8)x.c4;
+            XMLTag *pTag=&Cache.Tags[ (Cache.Index-1)&(CacheSize-1) ], *Tag = &Cache.Tags[ Cache.Index&(CacheSize-1)];
+            XMLAttribute *Attribute=&((*Tag).Attributes.Items[ (*Tag).Attributes.Index&3]);
+            XMLContent *Content=&(*Tag).Content;
+            pState=State;
+            c8=(c8<<8)|buf(5);
+            if ((B==0x09 || B==0x20) && (B==(U8)(x.c4>>8) || !WhiteSpaceRun)) {
+                WhiteSpaceRun++;
+                IndentTab = (B==0x09);
+            }
+            else{
+                if ((State==xNone || (State==xReadContent && (*Content).Length<=LineEnding+WhiteSpaceRun)) && WhiteSpaceRun>1+IndentTab && WhiteSpaceRun!=pWSRun) {
+                    IndentStep=abs((int)(WhiteSpaceRun-pWSRun));
+                    pWSRun=WhiteSpaceRun;
+                }
+                WhiteSpaceRun=0;
+            }
+            if (B==0x0A)
+            LineEnding=1+((U8)(x.c4>>8)==0x0D);
+            if(State!=xNone) lastState=x.blpos;
+            switch (State) {
+            case xNone: {
+                    if (B==LESSTHAN){
+                        State=xReadTagName;
+                        memset(Tag, 0, sizeof(XMLTag));
+                        (*Tag).Level=((*pTag).EndTag || (*pTag).Empty)?(*pTag).Level:(*pTag).Level+1;
+                    }
+                    if ((*Tag).Level>1)
+                    DetectContent();
+                    
+                    xlU4=(hash(pState, State, ((*pTag).Level+1)*IndentStep - WhiteSpaceRun));
+                    break;
+                }
+            case xReadTagName: {
+                    if ((*Tag).Length>0 && (B==0x09 || B==0x0A || B==0x0D || B==0x20))
+                    State = xReadTag;
+                    else if ((B>127) || (B==COLON || B==FIRSTUPPER || B==UPPER || B==0x5F|| (B>='a' && B<='z')) || ((*Tag).Length>0 && (B==0x2D || B==0x2E || (B>='0' && B<='9')))) {
+                        (*Tag).Length++;
+                        (*Tag).Name=(*Tag).Name * 263 * 32 + (B&0xDF);
+                    }
+                    else if (B == GREATERTHAN) {
+                        if ((*Tag).EndTag){
+                            State=xNone;
+                            Cache.Index++;
+                        }
+                        else
+                        State = xReadContent;
+                    }
+                    else if (B!=0x21 && B!=0x2D && B!=0x2F && B!=0x5B) {
+                        State=xNone;
+                        Cache.Index++;
+                    }
+                    else if ((*Tag).Length==0) {
+                        if (B==0x2F) {
+                            (*Tag).EndTag=true;
+                            (*Tag).Level=max(0,(*Tag).Level-1);
+                        }
+                        else if (x.c4==(LESSTHAN*256*256*256+0x212D2D)) { //LESSTHAN
+                            State=xReadComment;
+                            (*Tag).Level=max(0,(*Tag).Level-1);
+                        }
+                    }
+
+                    if ((*Tag).Length==1 && (x.c4&0xFFFF00)==(LESSTHAN*256*256+0x2100)) {//LESSTHAN
+                        memset(Tag, 0, sizeof(XMLTag));
+                        State=xNone;
+                    }
+                    int i=1;
+                    do {
+                        pTag=&Cache.Tags[ (Cache.Index-i)&(CacheSize-1) ];
+                        i+=1+((*pTag).EndTag && Cache.Tags[ (Cache.Index-i-1)&(CacheSize-1) ].Name==(*pTag).Name);
+                    } while ( i<CacheSize && ((*pTag).EndTag || (*pTag).Empty) );
+
+                    xlU4=(hash(pState*8+State, hash((*Tag).Name, (*Tag).Level),hash((*pTag).Name, (*pTag).Level!=(*Tag).Level) ) );
+                    break;
+                }
+            case xReadTag: {
+                    if (B==0x2F)
+                    (*Tag).Empty=true;
+                    else if (B==GREATERTHAN){
+                        if ((*Tag).Empty){
+                            State=xNone;
+                            Cache.Index++;
+                        }
+                        else
+                        State=xReadContent;
+                    }
+                    else if (B!=0x09 && B!=0x0A && B!=0x0D && B!=0x20) {
+                        State = xReadAttributeName;
+                        (*Attribute).Name=B;
+                    }
+                    xlU4=(hash(pState, State, hash((*Tag).Name, B, (*Tag).Attributes.Index)));
+                    break;
+                }
+            case xReadAttributeName: {
+                    if ((x.c4&0xFFF0)==(EQUALS*256+SPACE) && (B==0x22 || B==0x27)) {
+                        State=xReadAttributeValue;
+                        if ((c8&0xDFDF)==0x4852 && (x.c4&0xDFDF0000)==0x45460000)
+                        (*Content).Type|=xLink;
+                    }
+                    else if (B!=0x22 && B!=0x27 && B!=EQUALS)
+                    (*Attribute).Name=(*Attribute).Name*263*32+(B&0xDF);
+
+                    xlU4=(hash(pState*8+State, (*Attribute).Name, hash((*Tag).Attributes.Index, (*Tag).Name, (*Content).Type )));
+                    break;
+                }
+            case xReadAttributeValue: {
+                    if (B==0x22 || B==0x27) {
+                        (*Tag).Attributes.Index++;
+                        State=xReadTag;
+                    }
+                    else{
+                        (*Attribute).Value=(*Attribute).Value*263*32+B;
+                        (*Attribute).Length++;
+                        if (lastCW==cwHTTP && ((x.c4>>8)==(COLON*256*256+0x2F2F) )) // HTTP :// s://
+                        (*Content).Type|=xURL;
+                    }
+                    xlU4=(hash(pState, State, hash((*Attribute).Name, (*Content).Type )));
+                    break;
+                }
+            case xReadContent: {
+                    if (B==LESSTHAN) {
+                        State=xReadTagName;
+                        Cache.Index++;
+                        memset(&Cache.Tags[ Cache.Index&(CacheSize-1) ], 0, sizeof(XMLTag));
+                        Cache.Tags[Cache.Index&(CacheSize-1) ].Level=(*Tag).Level+1;
+                    }
+                    else{
+                        (*Content).Length++;
+                        (*Content).Data=(*Content).Data*997*16+B;
+
+                        DetectContent();
+                    }
+                    xlU4=(hash(pState, State,hash( (*Tag).Name, x.c4&0xC0FF )));
+                    break;
+                }
+            case xReadComment: {
+                    if ((x.c4&0xFFFFFF)==(0x2D2D00+GREATERTHAN)) { // -->
+                        State=xNone;
+                        Cache.Index++;
+                    }
+                    xlU4=(hash(pState, State));
+                    break;
+                }
+            }
+            StateBH[pState]=(StateBH[pState]<<8)|B;
+            pTag=&Cache.Tags[ (Cache.Index-1)&(CacheSize-1) ];
+            // set context if last state was less then 256 bytes ago
+            isXML=(x.blpos-lastState)<64;
+            xlU1=hash(State, (*Tag).Level, hash(pState*2+(*Tag).EndTag, (*Tag).Name));
+            xlU2=hash((*pTag).Name, State*2+(*pTag).EndTag,hash( (*pTag).Content.Type, (*Tag).Content.Type));
+            xlU1=hash(State*2+(*Tag).EndTag, (*Tag).Name,hash( (*Tag).Content.Type, x.c4&0xE0FF));
+        }
+        U8 s = ((StateBH[State]>>(28-x.bpos))&0x08) |
+        ((StateBH[State]>>(21-x.bpos))&0x04) |
+        ((StateBH[State]>>(14-x.bpos))&0x02) |
+        ((StateBH[State]>>( 7-x.bpos))&0x01) |
+        ((x.bpos)<<4);
+        return (s<<3)|State;
+    }
+};
+
 // Predictor
 
 const U32 primes[14]={0, 257,251,241,239,233,229,227,223,211,199,197,193,191};
@@ -3488,6 +3764,7 @@ ContextMap1 cmC1[8];
 ContextMap2 cmC2[21]; // v26 step16: +[20]; [18]/[19] land in step 17
 ContextMap2 cmcr[1+8]; // v26 step18 (ContextMap3 in v26; class migrates in step 20)
 ContextMap2 cmcr2[4];  // v26 step18
+ContextMap2 cmC44;     // v26 step19 (ContextMap3 in v26; class migrates in step 20)
 StationaryMap maps1; // v26 step15
 StationaryMap maps2; // v26 step15
 APM<256>  apmA0;
@@ -3514,6 +3791,7 @@ SentenceContext sencxtCL; // v26 step17: wikilinks
 
 WordsContext *simiwor;    // v26 step17: best similar sentence (or empty)
 BracketContext<U16> htcxt;
+XMLModel1 xml; // v26 step19
 
 //DirectStateMap dcsm;  //1x5 inputs to fp
 //DirectStateMap dcsm1; //1x2 inputs to fp
@@ -3561,7 +3839,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36+192)&-16; // v26 step15: +4; step16: +18; step17: +36; step18: +192 cmcr/cmcr2 (2*6+36*5) -> N=768 (S=784)
+    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36+192+24)&-16; // v26 step15: +4; step16: +18; step17: +36; step18: +192; step19: +24 cmC44 (4*6) -> N=784 (S=800)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -3588,6 +3866,7 @@ void PredictorInit() {
     cmC1[4].Init(     16*4096,6|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA7[0][0],c_s4[12],0,1,&st2_p1[0]); // v26 step12: +1 ctx (h+PStateH); v26 size 32*4096 deferred to step 21
     
     cmC[0].Init(      16*4096,7|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0,1,&st2_p1[0]);
+    cmC44.Init( 1*4096*4096,4|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step19
     cmcr[0].Init( 1*4096*4096,2|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step18
     for (int i=0;i<8;i++)
         cmcr[i+1].Init( 2048*4096,3|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
@@ -3637,6 +3916,7 @@ void PredictorInit() {
     sencxtCL.Init(); // v26 step17
     simiwor=sencxt.SimilarSentence(&worcxt,0); // v26 step17: start at &empty
     htcxt.Init(&html[0],2,false,0xfff);
+    xml.Init(); // v26 step19
 
     //smatch.Init();  // v26 port: SparseMatchModel removed
     cWord=&StemWords[0], pWord=&StemWords[3];
@@ -4075,10 +4355,14 @@ void __attribute__ ((noinline)) updateSen(int i=0) {
     if (i==0 && colcxt.isTemp==false) worcxt1.Reset();
 }
 
+int xmlS=0; // v26 step19 (xml.p() 9-bit state; mxA[16] context arrives in step 23)
+
 // Main context parsing and prediction
 int modelPrediction(int c0,int bpos,int c4){
     int i,c;
     U32 h,j;
+
+    if (bpos) xmlS=xml.p(); // v26 step19 (bpos 1-7 leg; the bpos==0 leg runs post-parse, before the cmC44 sets)
 
     if (bpos== 0){
         // v26 step9: skip mode based on a match length (uses previous-byte parser state, as in v26 parseByte)
@@ -4902,6 +5186,19 @@ int modelPrediction(int c0,int bpos,int c4){
                 cmC[0].set( word0+wrt_2b[bufr(colcxt.abovecellpos)] );
             }
         }
+        // xml // v26 step19
+        xmlS=xml.p(); // v26 step19 (bpos==0 leg: after byte parse incl. lastCW, before cmC44 sets)
+        if (isXML==true) {
+            cmC44.set(xlU1);// ?
+            cmC44.set(xlU2);
+            cmC44.set(xlU3);
+            cmC44.set(xlU4);
+        } else {
+            cmC44.sets();
+            cmC44.sets();
+            cmC44.sets();
+            cmC44.sets();
+        }
 
         if (fc==SPACE|| skipM1 || skipSeeExternal || isPageStarted==false) { // v26 step11
             cmC[1].sets(); cmC[1].sets(); cmC[1].sets();
@@ -5131,6 +5428,7 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC2[10].mix();
     cmC2[11].mix();
     cmC2[12].mix();
+    cmC44.mix(); // v26 step19
     // order Word
     ordW=ordW+cmC2[13].mix();  
     cmC[3].mix();  
