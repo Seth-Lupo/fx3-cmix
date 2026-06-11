@@ -41,8 +41,22 @@ self-extracting archive = cmix binary + compressed dict + compressed order + hea
 2. **RAM ceiling**: 9.5/10 GB used. PPM pushed to disk-mmap. Any new model must steal memory from elsewhere or be tiny.
 3. **Binary size**: every byte of code is a byte of S1. Runtime-generated tables, `-Os`, UPX. New code must pay for itself: saving X bytes of archive is void if it adds ≥X bytes of compressed binary.
 
+## Predictor graph (verified from predictor.cpp, 2026-06-10)
+461 inputs feed layer-0. Ensemble members, in input order:
+1. **bracket_model_** — byte-level bracket model (`models/bracket.cpp`, params 200/10/100000) + 1 direct model + 1 indirect-NS model on a bracket context.
+2. **fxcm_model_** (`fxcmv1.cpp`) — multi-output; the dominant predictor.
+3. **match models ×10** — 5 on sparse word contexts `{0},{1},{1,3},{1,2,3},{7,2}` + 5 on byte context hashes `{0,8},{1,8},{7,4},{11,3},{13,2}`; limit 200, δ 0.5, ≤2M entries; one run-map indirect on word ctx {1}.
+4. **indirect nonstationary ×15** — 10 sparse word-context combos + 4 "double indirect" (ind1/2/3/5) + bracket; δ 200–400, shared map.
+5. **byte_model_ = PPMD** — order **25**, **14,000 MB** arena (→ the 14.68 GB `ppm.temp` when mmap_to_disk; this is the single biggest memory object).
+6. **byte_mixer_ = LSTM** — `Lstm(vocab, vocab, 200 cells, 1 layer, 128, lr 0.03, 10)`, fed PPM's 256-way byte prediction; its output can **override the whole ensemble** when fully saturated (==0.0 or ==1.0).
+
+**Mixing**: layer-0 = 23 logistic mixers, each with own context + learning rate (0.005 / 0.0005 / 0.001 / 0.002 / 0.0007 / 0.0003 mix); contexts include mx5–mx19, words, line_break, longest_match, recent_bytes[2], auxiliary (= avg of fxcm & LSTM predictions, discretized ×15 — a confidence signal). Layer-1 = 1 final mixer over the 23 stretched layer-0 outputs + fxcm + LSTM directly. Then **SSE** stage. Weight-decay 1e-4; sigmoid LUT 100001 entries.
+
+**Tunable surface spotted** (Phase 2B candidates): 23 mixer learning rates, deltas (200/400/0.5), match limit/size, PPM order & arena size, LSTM hyperparams, auxiliary discretization (×15), SSE params, UPDATE_LIMIT/SEED defines.
+
 ## TODO (Phase 1 deep-dive)
-- [ ] Map the exact predictor graph: all 461 models, their contexts, memory budgets.
+- [x] Map the top-level predictor graph (above).
+- [ ] Count the 461 inputs exactly per member (fxcm NumOutputs dominates — verify).
 - [ ] Trace fxcmv1.cpp: word-stream state machine, ContextMap internals, mixer wiring.
 - [ ] Document the transform format byte-for-byte (escape codes, article framing).
 - [ ] Profile: where do the ~228k seconds actually go? (fxcm vs PPM vs LSTM vs mixers)
