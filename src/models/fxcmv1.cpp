@@ -3655,6 +3655,10 @@ U32 sVerb=0;
 bool lastArt=false; // was last word article 'the'
 bool isNowiki=false; // boundary of xml nowiki  tag
 U32 cwSTR=0x10000,cwCOLON=0x10000; // v26 step10: last decoded tag / pre-colon codewords
+#ifndef FXCM_RESET_CADENCE
+#define FXCM_RESET_CADENCE 1
+#endif
+int artResetCnt=0; // exp036: per-article CM reset cadence probe (1 = v26 behavior, reset every article)
 int deccode=0; // mixer(8)/cmix context for stream2b or decoded word index
 
 bool isText=false; // simulate line break after xml text tag
@@ -4620,6 +4624,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 if (pageParag<2 && pageSent<5) lastPTOP++; // v26 step12
                 // v26 step22: per-article CM resets (FIXED reset(): memset from aligned t,
                 // (tmask+1) buckets; StateMaps preserved). v26 reset order kept verbatim.
+                if ((++artResetCnt%FXCM_RESET_CADENCE)==0) { // exp036: kaitz's data says reset POLICY is the lever; deterministic (counter derives from decoded stream)
                 cmC4[1].reset();
                 cmC4[2].reset();
 
@@ -4628,6 +4633,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 cmC4[8].reset();
                 cmC4[6].reset();
                 cmC[0].reset();
+                }
                 if ((lastPTOP&63)==63) cmC[1].reset(),lastPTOP++; // v26 step22: 64-short-page cadence
                 pageParag=pageSent=0; // v26 step12
             }
