@@ -90,7 +90,7 @@ inline int min(int a, int b) {return a<b?a:b;}
 inline int max(int a, int b) {return a<b?b:a;}
 #endif
 
-int num_models = 439+1-2-7-2-4+5+4+15+30;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17)
+int num_models = 439+1-2-7-2-4+5+4+15+30+154;  // v26 port: -SparseMatchModel(2) -4 SSCMs(4) +cmC1[4] PStateH slot(5, step12) +2 StationaryMaps(4, step15) +cmC2[20] 3 slots(15, step16) +cmC2[18]/[19] 6 slots(30, step17) +cmcr 26 slots/cmcr2 12 slots(154=2*5+36*4, step18)
 std::valarray<float> model_predictions(0.5f, num_models);
 unsigned int prediction_index = 0;
 float conversion_factor = 1.0 / 4095;
@@ -212,7 +212,7 @@ struct BlockData {
     }
 };
 
-BlockData<528+64> x; //maintains current global data block // v26 step17: +32 input headroom (S=592 >= N=576)
+BlockData<528+256> x; //maintains current global data block // v26 step18: S=784 >= N=768
 
 
 // ilog(x) = round(log2(x) * 16), 0 <= x < 256
@@ -3411,6 +3411,13 @@ U32 lastPTOP=-1,pageParag=0,pageSent=0; // v26 step12: short-page shift register
 bool isLongTOP=false;       // v26 step12 (write-only in v26 too)
 bool wasVerb=false,wasNoun=false; // v26 step17 (write-only in v26 too)
 U32 wasVerbH=0,wasNounH=0;        // v26 step17 (write-only in v26 too)
+bool nestList=false;     // v26 step18: '**' nested-list flag (gates cmcr word0 term)
+U32 s5bByte[8]{};        // v26 step18: last 3 bytes per 5b-class
+U32 stream5b=0;          // v26 step18: 3-bit stream of mapped chars (>127 -> 'a')
+U32 s2Word0[8*16]{};     // v26 step18: word0 per (BrFcIdx, 2b-window)
+U32 stream6b=0;          // v26 step18: dead in v26 too, kept for diffability
+U8 indirect2[256]{};     // v26 step18: 1-byte sparse indirect table
+U8 indirect3[256*256]{}; // v26 step18: 2-byte sparse indirect table
 int oldwt1=0; // v26 step16: getWT3 class of last worcxt2 word (consumed by mxA[12] in step 23)
 U32 wt3b=0,wt3cxt=0,wt3cxtW=0,wt3cxtW1=0,wt4cxtW=0,wt4cxtW1=0; // v26 step16 (wt3b/wt3cxtW1 dead in v26 too)
 
@@ -3479,6 +3486,8 @@ ContextMap1 cmC1[8];
 // large state memory, per context max 14 uniqe contexts state sets
 // for large amount of large contexts
 ContextMap2 cmC2[21]; // v26 step16: +[20]; [18]/[19] land in step 17
+ContextMap2 cmcr[1+8]; // v26 step18 (ContextMap3 in v26; class migrates in step 20)
+ContextMap2 cmcr2[4];  // v26 step18
 StationaryMap maps1; // v26 step15
 StationaryMap maps2; // v26 step15
 APM<256>  apmA0;
@@ -3552,7 +3561,7 @@ void PredictorInit() {
     apmA5.Init();
     rcmA[0].Init(1*4096*4096,6);
 
-    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36)&-16; // v26 step15: +4 StationaryMap; step16: +18 cmC2[20]; step17: +36 cmC2[18]/[19] -> N=576 (S=592)
+    x.mxInputs1.ncount=(515+16+1-5*2-2*2+4+18+36+192)&-16; // v26 step15: +4; step16: +18; step17: +36; step18: +192 cmcr/cmcr2 (2*6+36*5) -> N=768 (S=784)
     x.mxInputs2.ncount=(8+15)&-16;
 
     // Provide inputs array info to mixers
@@ -3579,6 +3588,11 @@ void PredictorInit() {
     cmC1[4].Init(     16*4096,6|(c_r[12]<<8)|(c_s[12]<<16),c_s3[12],&STA7[0][0],c_s4[12],0,1,&st2_p1[0]); // v26 step12: +1 ctx (h+PStateH); v26 size 32*4096 deferred to step 21
     
     cmC[0].Init(      16*4096,7|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0,1,&st2_p1[0]);
+    cmcr[0].Init( 1*4096*4096,2|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA2[0][0],c_s4[13],0xf0,1,&st2_p1[0]); // v26 step18
+    for (int i=0;i<8;i++)
+        cmcr[i+1].Init( 2048*4096,3|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
+    for (int i=0;i<4;i++)
+        cmcr2[i].Init( 1*4096*4096,3|(c_r[13]<<8)|(c_s[13]<<16),c_s3[13],&STA6[0][0],c_s4[13],0x00,0,&st2_p1[0]); // v26 step18
     cmC[1].Init(   64*2*4096,3|(c_r[14]<<8)|(c_s[14]<<16),c_s3[14],&STA5[0][0],c_s4[14],0xf0,0,&st2_p0[0]);
     cmC[2].Init(      2*4096,2|(c_r[15]<<8)|(c_s[15]<<16),c_s3[15],&STA2[0][0],c_s4[15],0xf0,0,&st2_p0[0]);
 
@@ -4368,7 +4382,7 @@ int modelPrediction(int c0,int bpos,int c4){
                     qocxt.Reset();
                 }
                 wt3cxt=0; // v26 step16
-                wasVerb=wasNoun=false; // v26 step17 (nestList reset joins this line in step 18)
+                wasVerb=wasNoun=nestList=false; // v26 step17+step18
                 wasVerbH=wasNounH=0;   // v26 step17
             }
             else if (c1=='.' || c1==')' || c1==QUESTION) {
@@ -4456,6 +4470,7 @@ int modelPrediction(int c0,int bpos,int c4){
                 isParagraph=1;
                 fc=FIRSTUPPER;
             }
+            if (nestList==false && colcxt.lastfc()=='*' && (c4&0xffff)==0x2a2a) nestList=true; // v26 step18
         }
 
         x5=(x5<<8)+(c4&0xff);
@@ -5032,6 +5047,38 @@ int modelPrediction(int c0,int bpos,int c4){
         }
 
         cmC2[15].set((BrFcIdx*256)+fc+((stream3bR&0xFFF)<< 16));
+
+        // v26 step18: sparse indirect family (cmcr/cmcr2)
+        U32 w4=(U32(c4)<<8)&0xff000000;  // unsigned shift, was UB (v26 UB-fix site)
+        // 3 bit stream of mapped chars, all chars above 127 are mapped to a-z range.
+        stream5b=(stream5b<<3) | (c1>127?wrt_3b['a']:wrt_3b[c1]);
+        const U8 buf2=(c4>>8)&0xff;
+        const U8 buf3=(c4>>16)&0xff;
+        //sparse indirect 1-byte contexts
+        U8 g=indirect2[c1]; // context from indirect
+        indirect2[buf2]=c1; // update indirect
+        cmcr[0].set(hash(indirectBrByte, w4|g));
+        //sparse indirect 2-byte contexts
+        g=indirect3[buf2<<8 | c1]; // context from indirect
+        indirect3[buf3<<8 | buf2]=c1; // update indirect
+        cmcr[0].set(hash(indirectBrByte, w4|g, colcxt.lastfc()));
+
+        //update s5bByte
+        s5bByte[((stream5b>>3)&7)]=c4&0xffffff;
+        for (int i=0; i<8; i++) {
+            U32 k=s5bByte[i];
+            cmcr[i+1].set(hash(BrFcIdx+(nestList==false?word0*191:0), k, deccode>>2));
+            cmcr[i+1].set(hash(BrFcIdx, stream5b&0x7fff, k & 0xffff));
+            cmcr[i+1].set(hash(BrFcIdx, ((stream5b&7)<<8) | (k & 0xff00ff),colcxt.lastfc()));
+        }
+        //update s2Word0
+        s2Word0[BrFcIdx*16+((stream2b>>2)&15)]=word0;
+        for (int i=0; i<4; i++) {//disable after 77.00%-89.53, 93.10-97.46% (enwik9)
+            U32 k=s2Word0[BrFcIdx*16+((stream2b>>(2*i) )&15)];
+            cmcr2[i].set(k);
+            cmcr2[i].set(k+h);
+            cmcr2[i].set(k+worcxt.Word());
+        }
         // Some APM context
         AH1=hash((x5>>0)&255, (x5>>8)&255, (x5>>16)&0x80ff);
         AH2=hash(19,     x5&0x80ffff);
@@ -5098,6 +5145,8 @@ int modelPrediction(int c0,int bpos,int c4){
     cmC1[7].mix();
     cmC2[18].mix(); // v26 step17
     cmC2[20].mix(); // v26 step16
+    for (int i=0;i<9;i++) cmcr[i].mix();  // v26 step18
+    for (int i=0;i<4;i++) cmcr2[i].mix(); // v26 step18
     rcmA[0].mix();
 
     AddPrediction(squash(64));  // FP mixer bias
