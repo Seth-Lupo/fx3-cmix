@@ -29,6 +29,18 @@ Build the autoresearch loop before touching the model.
 
 **Exit criteria:** ARCHITECTURE.md complete; ranked hotspot list; written list of ≥20 candidate experiments with expected-value guesses.
 
+## ⚡ STRATEGIC PIVOT (2026-06-10, post literature pass — see RESEARCH-CANDIDATES.md)
+kaitz (fx2 author) published his own **unsubmitted fx3-cmix** (Sept 2025): S = 109,735,627 = 0.954%, **50,431 bytes short of 1%**, blocked by a decompression-determinism bug (suspected FP mixer; "compressed stream identical up to some point", standalone fxcm round-trips fine) and marginal RAM (~10.06M kB). Code is GPL-3, released explicitly hoping it gets used.
+
+**Revised mainline** (replaces "invent 1.1 MB" with "fix + close 50 KB + margin"):
+- **M1. Reproduce**: build kaitz/fx3-cmix on Linux (lab/spot VMs), run proxy tiers, confirm his numbers at slice scale.
+- **M2. Fix the determinism bug**: this is debugging, not research — FP mixer is prime suspect (-ffp-model=fast / x87-vs-SSE / uninitialized read). Highest priority; gates ~1 MB of measured gains.
+- **M3. RAM compliance**: strict re-budget to <10 GB with measurement.
+- **M4. Close the gap**: +50–150 KB from article ordering (his new order file + 2026 embeddings), ContextMap rebalance dedupe, binary size, state-table seeds — all from the ranked list in RESEARCH-CANDIDATES.md.
+- **M5. Full-run validation + credit**: Kaido Orav must be credited prominently; user decides submission authorship questions.
+
+Phase 2 streams below remain the fallback/supplement if M1/M2 stall.
+
 ## Phase 2 — Experiment streams (ordered by expected ROI)
 Run many cheap experiments; promote winners up the tier ladder (1 MB smoke → 50/100 MB proxy → enwik8/full-tier → full enwik9 integration run).
 
