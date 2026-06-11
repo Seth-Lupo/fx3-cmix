@@ -1093,7 +1093,8 @@ struct ContextMap3 {
         }
     }
     void reset() {
-        memset((void*)ptr, 0, tmask*sizeof(E1<14,128>));
+        // Same alignment bug as ContextMap4::reset — see comment there.
+        memset((void*)t, 0, (tmask+1)*sizeof(E1<14,128>));
         for (int i=0; i<C; ++i) {
             cp0[i]=cp[i]=&t[0].bh[0][0];
             runp[i]=cp[i]+3;
@@ -1289,7 +1290,12 @@ struct ContextMap4 {
         }
     }
     void reset() {
-        memset((void*)ptr, 0, tmask*sizeof(E<3,32>));
+        // Zero the table via the ALIGNED base t, full used range (tmask+1 buckets).
+        // Was memset(ptr, 0, tmask*32): ptr is the raw calloc pointer, so the
+        // cleared window shifted by (t-ptr) — an allocator-alignment accident that
+        // differs between encoder and decoder processes, leaving stale states in
+        // the table tail in one of them. This was the fx3 nondeterminism bug.
+        memset((void*)t, 0, (tmask+1)*sizeof(E<3,32>));
         for (int i=0; i<C; ++i) {
             cp0[i]=cp[i]=&t[0].bh[0][0];
             runp[i]=cp[i]+3;
