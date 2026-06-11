@@ -4780,8 +4780,8 @@ inline Predictor::Predictor()  {
         st2_p2[i]=clp(sc(14*(i - 2048)));
     }
     // Match model
-    mhashtablemask=0x200000*1-1;
-    alloc1(mhashtable,0x200000*1+32,mhptr,32);
+    mhashtablemask=0x200000*2-1;
+    alloc1(mhashtable,0x200000*2+32,mhptr,32);
     // Generate state tables
     StateTable statetable;
     statetable.Init(28, 28, 31, 29, 23, 4, 17,&STA1[0][0]);
