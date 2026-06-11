@@ -5634,6 +5634,11 @@ void update() {
             fwrite(hdr, 4, 2, trf2);
             fwrite(model_predictions1, 2, prediction_index, trf2);
             fwrite(prediction_lines, 4, prediction_index, trf2);
+            for (int k = 0; k < 9; k++) {
+                U32 h2[2] = {(U32)k, (U32)cmC4[k].cn};
+                fwrite(h2, 4, 2, trf2);
+                fwrite(cmC4[k].cxt, 4, cmC4[k].cn, trf2);
+            }
         }
         bitn++;
     }
