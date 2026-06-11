@@ -5809,8 +5809,23 @@ inline Predictor::Predictor()  {
     statetable.Init(32, 28, 31, 28, 21, 5,  6,&STA2[0][0]);
     statetable.Init(31, 27, 30, 27, 24, 4, 27,&STA4[0][0]);
     statetable.Init(33, 31, 31, 24, 20, 4, 33,&STA5[0][0]);
-    statetable.Init(28, 29, 30, 30, 23, 3, 22,&STA6[0][0]);
-    statetable.Init(28, 29, 33, 23, 23, 6, 14,&STA7[0][0]);
+    // exp037: STA6/STA7 generator params sweepable via defines (defaults = v26 values).
+    // Author data: state-table identity is the most size-sensitive knob (paq8 table swap
+    // cost -319,523); these params were never swept post-v26.
+#ifndef FXCM_STA6_B5
+#define FXCM_STA6_B5 3
+#endif
+#ifndef FXCM_STA6_MDC
+#define FXCM_STA6_MDC 22
+#endif
+#ifndef FXCM_STA7_B5
+#define FXCM_STA7_B5 6
+#endif
+#ifndef FXCM_STA7_MDC
+#define FXCM_STA7_MDC 14
+#endif
+    statetable.Init(28, 29, 30, 30, 23, FXCM_STA6_B5, FXCM_STA6_MDC,&STA6[0][0]);
+    statetable.Init(28, 29, 33, 23, 23, FXCM_STA7_B5, FXCM_STA7_MDC,&STA7[0][0]);
     // v26 step25: pre2() runtime fill removed; pre1[] is the v26 const table
     // Load dictionary
     dosym();
