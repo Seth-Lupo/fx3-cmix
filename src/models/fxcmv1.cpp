@@ -4750,7 +4750,7 @@ void update1() {
     pz=apmA5.p(pu,   ((x.c0*4)^hash(min(9,pz),x5&0x80ff))&0x3ffff, rate,x.y);
     AddPrediction(pz);
     if (fails&255) pr=(pt*6+pu  +pv*11+pz*14 +31)>>5;
-    else           pr=(pt*4+pu*5+pv*12+pz*11 +31)>>5;
+    else           pr=(pt*4+pu*7+pv*12+pz*9 +31)>>5;
     AddPrediction(pr);
 
 }
