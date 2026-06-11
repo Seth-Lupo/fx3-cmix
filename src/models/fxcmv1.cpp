@@ -2222,8 +2222,8 @@ class Word {
 public:
   U8 Letters[MAX_WORD_SIZE];
   U8 Start, End;
-  U32 Hash, Type, Suffix, Preffix;;
-  Word(): Start(0), End(0), Hash(0), Type(0), Suffix(0), Preffix(0) {
+  U32 Hash, Type, Suffix, Preffix, NextW;  // v26 step8: NextW
+  Word(): Start(0), End(0), Hash(0), Type(0), Suffix(0), Preffix(0), NextW(0) {
     memset(&Letters[0], 0, sizeof(U8)*MAX_WORD_SIZE);
   }
   bool operator==(const char *s) const{
@@ -2275,6 +2275,14 @@ public:
     for (; i<count && (len!=strlen(a[i]) || memcmp(&Letters[Start], a[i], len)!=0); i++);
     return i<count;
   }
+  bool MatchesAnyP(const char* a[], const int count) {  // v26 step8
+    int i=0;
+    NextW=0xff;
+    size_t len = (size_t)Length();
+    for (; i<count && (len!=strlen(a[i]) || memcmp(&Letters[Start], a[i], len)!=0); i++);
+    if (i<count) NextW=i;
+    return i<count;
+  }
   bool EndsWith(const char *Suffix) const{
     size_t len=strlen(Suffix);
     return (Length()>len && memcmp(&Letters[End-len+1], Suffix, len)==0);
@@ -2306,7 +2314,8 @@ enum EngWordTypeFlags {
   Adposition             = (1<<16),
   Number                 = (1<<17), // not used
   Preposition            = (1<<18), // not used
-  ConjunctiveAdverb      = (1<<19)
+  ConjunctiveAdverb      = (1<<19),
+  Pronoun                = (1<<20)  // v26 step8
 };
 enum EngWordTypeFlagsNegation {
   Negation               = (1<<0),
@@ -2354,6 +2363,23 @@ const char *ApoWords[NUM_APO_WORDS]={"in","during","at","on","since","until","ab
 const char *PrepWords[NUM_PREP_WORDS]={"as","by","de","in","on"};
 #define  NUM_CAVER_WORDS 2 //Conjunctive Adverb
 const char *ConAdVerPrepWords[NUM_CAVER_WORDS]={"also","thus"};
+// v26 step8: pronouns/determiners — https://en.wikipedia.org/wiki/English_pronouns
+const char *Pronouns[14][5]={
+{" ",       "me",  "myself",     "mine",   "my"},
+{"we",      "us",  "ourselves",  "ours",   "our"},
+{"you",     "you", "yourself",   "yours",  "your"},
+{"thou",    "thee","thyself",    "thine",  "thy"},
+{"you",     "you", "yourselves", "yours",  "your"},
+{"he",      "him", "himself",    "his",    "his"},
+{"she",     "her", "herself",    "hers",   "her"},
+{"it",      "it",  "itself",     " ",      "its"},
+{"they",    "them","themself",   "theirs", "their"},
+{"they",    "them","themselves", "theirs", "their"},
+{"one",     "one", "oneself",    "one's",  "one's"},
+{"who",     "whom", " ",         "whose",  "whose"},
+{"what",    "what", " ",         " ",       " "},
+{"which",   "which"," ",         " ",       " "},
+};
 #define  NUM_VERB_WORDS 12 
 const char *VerbWords[NUM_VERB_WORDS]={"be","do","an","could","may","must","need","ought","shall","should","will","would"};
 #define  NUM_MALE_WORDS  9
@@ -3120,6 +3146,14 @@ public:
         res = true, (*W).Type|=Verb;
       else if (W->MatchesAny(Numbers, NUM_NUM))
         res = true, (*W).Type|=Number;
+      else {  // v26 step8: pronoun detection
+          for (int i=0;i<14;i++) {
+            if (W->MatchesAnyP(&Pronouns[i][0], 5)) {
+                res = true, (*W).Type|=Pronoun;
+                break;
+            }
+          }
+      }
     }
     Hash(W);
     return res;
@@ -3638,6 +3672,7 @@ int getWT(U32 t){
     else if (t& Suffix) return 12;
     else if (t& Prefix) return 13;
     else if (t& Plural) return 10;
+    else if (t& Pronoun) return 2;  // v26 step8
     else if (t) return 14;
     else return 15;
 }
