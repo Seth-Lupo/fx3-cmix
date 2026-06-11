@@ -101,3 +101,6 @@ Next: per-byte scalar dump (pos, word0, wp[word0], indirectWord0Pos, numberA, in
 | 032-t0 | 2026-06-11 | exp/032-cmC2-4-rollback | T0 | text_1M | 70,311 | ±0 | 6m08s | 7.37 GB | ⏳ T1 running | cmC2[4] 16→8×4096×4096 (−256 MiB); RSS already −210 MB at T0 |
 
 **Spot strategy abandoned for tonight (2026-06-11 ~20:45 UTC):** spot2 evicted twice and idle spot3 evicted once — 3 evictions in one evening across BOTH regions (capacity reclaim, utilization-independent). Remaining ~20 probe runs moved to lab2 cores 1-2 (on-demand, idle until the 10:30 UTC T3 gate; queueA = RAM trims on core 1, queueB = 036/037 creative batch on core 2, 60s stagger for git lock). Both spot boxes left deallocated. Loss: 032-t1 in-flight (requeued).
+
+| 036 all | 2026-06-11 | exp/036-reset-cadence | T0 | text_1M | 70,311 ×4 | **sane=c2=c8=off, all identical** | ~9m each | 7.6 GB | 🔬 **T0 is BLIND for resets** | the page-end reset trigger (cwPAGE codeword sequence) never fires inside the 1MB slice — cadence question promoted to T1 (queueC armed: 036c2-t1, 036off-t1). Methodology datum: structural/boundary-triggered features need slices containing the trigger |
+| 037sane | 2026-06-11 | exp/037-sta-tune | T0 | text_1M | 70,311 | ±0 ✓ gate green | 9m25s | 7.6 GB | ✅ sanity | STA6/7 wide grid (mdc±4, b5±1) running on core 2 |
