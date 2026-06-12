@@ -47,3 +47,7 @@ Chosen within quota: **Standard_D4ds_v4** (4 vCPU, 16 GB RAM, 150 GiB local temp
 | 1 MB smoke (~4 min) | pennies |
 
 **Open question for user:** remaining credit on the student subscription and willingness to fund beyond it (~$100 doesn't survive many full validation runs).
+
+## Speed (content-identical, adopted 2026-06-12)
+- `GLIBC_TUNABLES=glibc.malloc.hugetlb=1` on every timed/production run: −7.5% wall, md5-verified identical output (T0 A/B on lab2). Reason: only ~28% of the ~8GB hash-table working set lands on transparent huge pages by default; the tunable forces MADV_HUGEPAGE. Worth ~3.5h of the ~46h prize time budget.
+- perf profile of a live run: flat (top function 6.3%), no code hotspots — do not pursue code-level micro-optimization; -Ofast/FP-reassociation FORBIDDEN (changes FP mixer output = the determinism bug class).
