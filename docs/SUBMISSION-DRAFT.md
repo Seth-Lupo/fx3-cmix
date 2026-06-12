@@ -6,7 +6,7 @@
 
 | Metric | Value |
 |---|---|
-| Compressor executable size (S1) | **TBD** (fx2 reference: 441,983 our build / 441,463 published; kaitz fx3: 437,663) |
+| Compressor executable size (S1) | **455,757** first packaged measure (fx2: 441,983 our / 441,463 published; kaitz fx3: 437,663) — S1-diet in progress |
 | Self-extracting archive size (S2) | **TBD** (primary T3 in flight; expect ~108.7–109.3M) |
 | Total S = S1 + S2 | **TBD** |
 | Previous record L (fx2-cmix, 2024) | 110,793,128 |
