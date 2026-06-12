@@ -67,7 +67,7 @@ is the integration port, the two determinism fixes, RAM/time compliance, and val
 |---|---|
 | Per-step decode round-trips at 1MB tier (all 25 port steps) | ✅ ledger |
 | Full-scale standalone v26 compress (586MB → 113,264,781, in author's band) | ✅ |
-| Full-scale standalone v26 decompress round-trip | **TBD (in flight)** |
+| Full-scale standalone v26 decompress round-trip (586MB byte-exact) | ✅ 2026-06-12 |
 | Cross-process determinism (reset-alignment fix) | ✅ ASan/Valgrind/elimination chain |
 | Cross-microarchitecture determinism (Intel↔AMD bit-identical archives) | ✅ |
 | T3 compress (the submission number) | **TBD ~Jun 18** |
