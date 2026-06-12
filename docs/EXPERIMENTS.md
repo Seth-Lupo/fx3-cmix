@@ -120,3 +120,6 @@ Next: per-byte scalar dump (pos, word0, wp[word0], indirectWord0Pos, numberA, in
 | 034-t0 | 2026-06-11 | exp/034-cmcr2-half | T0 | text_1M | 70,311 | ±0 | 9m01s | 7.55 GB | ⏳ T1 running | cmcr2 family halved (−64MiB) |
 
 | thp-ab | 2026-06-12 | fx3-candidate PGO binary | T0 | text_1M | md5 IDENTICAL (4c097ccd…) | wall **14:32.85 → 13:27.00 = −7.5%** | — | 7.97 GB | ✅ **adopt for all timed runs** | `GLIBC_TUNABLES=glibc.malloc.hugetlb=1` — only 28% of the 8GB working set was on huge pages (smaps); tunable forces MADV_HUGEPAGE on malloc arenas. Output provably identical, ~3.5h of the ~46h submission time budget for free. perf profile separately confirmed NO code hotspots (flattest distribution, top fn 6.3% — memory system, not code, is the lever) |
+
+| 034-t1 | 2026-06-12 | exp/034-cmcr2-half | T1 | text_10M | 1,051,581 | **+83 — first non-free trim, REJECT** | 1h22m | 7.82 GB | ❌ keep cmcr2 full | −64MiB not needed; −803MiB already banked free |
+| 035-t0 | 2026-06-12 | exp/035-ppm-o26-tip | T0 | text_1M | 70,253 | **−58** (pre-port: −61 — replicated) | 9m00s | 7.60 GB | ⏳ T1 confirming | PPM order 25→26 atop tip; consistent direction twice, sub-threshold alone |
