@@ -82,3 +82,9 @@ Pin `-march` to committee hardware, final PGO build, source cleanup + OSI licens
 - [x] Rules + record verified; repo surveyed; plan written.
 - [x] Azure providers (Compute/Network/Storage) registration kicked off.
 - [ ] Phase 0.1: provision lab VM ← **next action**
+
+## Gate decision rule (adopted 2026-06-12, after independent review)
+At the T2 A/B readout (tip 14,093,160 vs fx2main-t2 baseline):
+- **tip ≥ −1.25% at T2** → byte margin healthy; shift weight to HARDENING: full-scale RAM verify (projection 8.8GiB), timing dossier (w/ hugetlb −7.5%), GB5 score, T3 decode round-trip, cross-µarch decode. Reorder/rebalance stay as upside.
+- **tip attenuated toward −1.0%** → rebalance (exp/039 first datapoint already in flight) + modern-embedding reorder (Mac pipeline starting) become NECESSITY-tier.
+Key hypothesis on record: our 559-export config may already beat kaitz's 0.954% (his 487-export/16-mixer config looks like time-budget concessions; exp/038 showed pruning toward it costs bytes). The A/B resolves this.
