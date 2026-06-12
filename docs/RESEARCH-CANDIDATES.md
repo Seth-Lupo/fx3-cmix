@@ -198,3 +198,6 @@ Ranked post-T3 margin levers (engaged only if first T3 lands in 0.95–1.0%):
 4. **Adaptive-LR mixer** (paq8px-proven, Pais) — cheap probe on fxcm final chain; modest expectation given kaitz's LR tuning history.
 
 Closed lines (do not reopen): STA generator params (full surface swept flat), export pruning (load-bearing, +1,199 @T1), order-file delta coding (real-cmix inverted the xz proxy, +8,882 — proxy-trap case study #2), all of §(b).
+
+### Upstream audit 2026-06-12
+kaitz fx3 repo: README-only commits 2025-11-17 and 2026-04-26 (cosmetic), still "Unsubmitted", no new code/results. **Lead found in README history**: the pre-Nov-2025 README claimed cmix-side trims — "Removed 16 predictors / Removed 4 mixers / LSTM cell count reduced by ~30" — later softened to "Generates 6 predictions / Uses 16 mixers" (fx2 uses 24 mixers). Our port did NOT touch the cmix-side mixer bank or LSTM size. If fx3 really ran 16 cmix mixers + smaller LSTM, there is an unported delta worth speed (his fx3 hit the time budget at 99.5%!) and possibly size. **Iteration-2 candidate alongside memory rebalance: exp/04x cmix-side mixer/predictor trim per old README claims.** Cross-check num_models accounting before porting (his "~487 to cmix" vs our 559 runtime also hints our export set is larger than his).
