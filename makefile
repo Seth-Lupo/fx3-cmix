@@ -19,6 +19,11 @@ endif
 
 CPPFLAGS_PART-THAT-CAN-BE-SLOW    := $(CPPFLAGS_PART-THAT-SHOULD-BE-FAST)
 CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -Os -fdata-sections -ffunction-sections
+# -mrecip=none: forbid vrcpps/vrsqrtps approximate-reciprocal codegen (vendor-divergent
+# results under -ffp-model=fast; Intel vs AMD desync the arithmetic coder — the historic
+# cross-machine "FP mixer" nondeterminism). Exact division is IEEE and deterministic.
+CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -mrecip=none
+CPPFLAGS_PART-THAT-CAN-BE-SLOW    += -mrecip=none
 CPPFLAGS_PART-THAT-SHOULD-BE-FAST += -O3 -fdata-sections -ffunction-sections
 
 LFLAGS := -m64 -Wl,--gc-sections -std=c++17
