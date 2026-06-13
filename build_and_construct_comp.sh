@@ -19,7 +19,7 @@ llvm-profdata-17 merge -output=default.profdata ./pgo_data/*
 mv default.profdata pgo_data/
 
 make CFLAGS_DEFINES="$CFLAGS_DEFINES" prof_use -j
- upx-ucl -9 cmix 
+ upx-ucl --best --ultra-brute cmix 
 
 # this is a directory where the compressor binary will be placed 
 DIR=run
