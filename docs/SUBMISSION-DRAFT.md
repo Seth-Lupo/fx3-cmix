@@ -6,7 +6,7 @@
 
 | Metric | Value |
 |---|---|
-| Compressor executable size (S1) | **455,757** first packaged measure (fx2: 441,983 our / 441,463 published; kaitz fx3: 437,663) — S1-diet in progress |
+| Compressor executable size (S1) | **436,893** (binary 136,892 ultra-brute upx + dict 100,581 + order 199,408 + hdr 12) — beats kaitz 437,663 |
 | Self-extracting archive size (S2) | **TBD** (primary T3 in flight; expect ~108.7–109.3M) |
 | Total S = S1 + S2 | **TBD** |
 | Previous record L (fx2-cmix, 2024) | 110,793,128 |
