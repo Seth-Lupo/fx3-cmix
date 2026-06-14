@@ -1834,15 +1834,15 @@ void vec_push( vec<T,S> *o, const T element){
 }
 template <typename T  = int,const int S>
 int vec_at(vec<T,S> *o, const int index){
-    return o->cxt[index];
+    return o->cxt[index&(S-1)]; // vec-bounds fix: ring-buffer mask (S is pow2); completes vec_push rollover, was OOB on >capacity index
 }
 template <typename T  = int,const int S>
 T &vec_ref(vec<T,S> *o, const int index){
-    return o->cxt[index];
+    return o->cxt[index&(S-1)]; // vec-bounds fix
 }
 template <typename T  = int,const int S>
 void vec_i(vec<T,S> *o, const int index){
-    o->cxt[index]++;
+    o->cxt[(index)&(S-1)]++; // vec-bounds fix
 }
 template <typename T  = int,const int S>
 void vec_pop(vec<T,S> *o){
