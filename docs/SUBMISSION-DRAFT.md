@@ -9,6 +9,7 @@
 | Compressor executable size (S1) | **436,893** (binary 136,892 ultra-brute upx + dict 100,581 + order 199,408 + hdr 12) — beats kaitz 437,663 |
 | Self-extracting archive size (S2) | **TBD** (primary T3 in flight; expect ~108.7–109.3M) |
 | Total S = S1 + S2 | **TBD** |
+| Our fx2 baseline S2 (same toolchain) | 110,111,312 (published fx2 S2: 110,351,665) |
 | Previous record L (fx2-cmix, 2024) | 110,793,128 |
 | Improvement 1 − S/L | **TBD** (target ≥ 1% → S ≤ 109,685,196) |
 | Running time | **TBD** h on **TBD** machine, Geekbench5 single-core T = **TBD** → budget 70,000/T h |
